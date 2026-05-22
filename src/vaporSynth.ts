@@ -29,6 +29,7 @@ class VaporSynth {
   private master: GainNode | null = null;
   private feedbackDelay: DelayNode | null = null;
   private muted: boolean;
+  private ducked = false;
   private _volume: number;
   private started = false;
   private running = false;
@@ -48,7 +49,7 @@ class VaporSynth {
   setVolume(level0to100: number) {
     this._volume = Math.max(0, Math.min(100, level0to100)) / 100;
     try { localStorage.setItem(VOLUME_KEY, String(level0to100)); } catch {}
-    if (this.master && this.ctx && !this.muted) {
+    if (this.master && this.ctx && !this.muted && !this.ducked) {
       this.master.gain.cancelScheduledValues(this.ctx.currentTime);
       this.master.gain.linearRampToValueAtTime(this._volume, this.ctx.currentTime + 0.4);
     }
@@ -58,10 +59,18 @@ class VaporSynth {
     this.muted = value;
     try { localStorage.setItem(MUTED_KEY, value ? '1' : '0'); } catch {}
     if (this.master) {
-      const target = value ? 0 : this._volume;
+      const target = value || this.ducked ? 0 : this._volume;
       this.master.gain.cancelScheduledValues(this.ctx!.currentTime);
       this.master.gain.linearRampToValueAtTime(target, this.ctx!.currentTime + 0.4);
     }
+  }
+
+  setDucked(value: boolean): void {
+    this.ducked = value;
+    if (!this.master || !this.ctx) return;
+    const target = this.muted || value ? 0 : this._volume;
+    this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.master.gain.linearRampToValueAtTime(target, this.ctx.currentTime + 0.35);
   }
 
   // Call from a user-gesture handler. Idempotent.
@@ -75,7 +84,7 @@ class VaporSynth {
     if (this.ctx.state === 'suspended') await this.ctx.resume();
 
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : this._volume;
+    this.master.gain.value = this.muted || this.ducked ? 0 : this._volume;
     this.master.connect(this.ctx.destination);
 
     // Cheap "reverb": delay with feedback into a low-pass.

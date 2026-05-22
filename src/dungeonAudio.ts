@@ -17,30 +17,30 @@ type TrackStep = {
 
 const TRACKS: Record<DungeonMusicMode, TrackStep> = {
   crawl: {
-    bass: [49, 49, 61.74, 49, 73.42, 61.74, 55, 61.74],
-    lead: [196, 246.94, 293.66, 246.94, 392, 329.63, 293.66, 246.94],
-    chord: [98, 123.47, 146.83, 196],
-    bpm: 92,
+    bass: [36.71, 36.71, 43.65, 36.71, 49, 46.25, 41.2, 43.65],
+    lead: [146.83, 174.61, 207.65, 174.61, 293.66, 261.63, 220, 174.61],
+    chord: [73.42, 87.31, 110, 146.83],
+    bpm: 104,
     swing: 0.03,
     color: 'triangle',
     kickEvery: 4,
     snareAt: [4, 12],
   },
   battle: {
-    bass: [65.41, 65.41, 98, 65.41, 77.78, 87.31, 98, 116.54],
-    lead: [261.63, 392, 311.13, 466.16, 349.23, 523.25, 392, 587.33],
-    chord: [130.81, 155.56, 196, 261.63],
-    bpm: 138,
+    bass: [55, 55, 82.41, 55, 61.74, 73.42, 82.41, 103.83],
+    lead: [220, 329.63, 261.63, 440, 293.66, 554.37, 392, 659.25],
+    chord: [110, 130.81, 164.81, 220],
+    bpm: 156,
     swing: 0.015,
     color: 'square',
     kickEvery: 2,
     snareAt: [4, 10, 14],
   },
   boss: {
-    bass: [41.2, 55, 41.2, 61.74, 41.2, 73.42, 65.41, 55],
-    lead: [164.81, 196, 220, 246.94, 293.66, 246.94, 220, 196],
-    chord: [82.41, 98, 123.47, 146.83],
-    bpm: 116,
+    bass: [30.87, 41.2, 30.87, 46.25, 30.87, 55, 49, 41.2],
+    lead: [123.47, 164.81, 185, 220, 246.94, 220, 185, 164.81],
+    chord: [61.74, 82.41, 92.5, 123.47],
+    bpm: 128,
     swing: 0.025,
     color: 'sawtooth',
     kickEvery: 1,
@@ -57,9 +57,9 @@ const TRACKS: Record<DungeonMusicMode, TrackStep> = {
     snareAt: [8],
   },
   shop: {
-    bass: [55, 65.41, 73.42, 82.41, 73.42, 65.41, 61.74, 65.41],
-    lead: [220, 261.63, 329.63, 392, 329.63, 293.66, 261.63, 246.94],
-    chord: [110, 130.81, 164.81, 220],
+    bass: [46.25, 55, 65.41, 73.42, 65.41, 55, 51.91, 55],
+    lead: [185, 220, 277.18, 369.99, 277.18, 246.94, 220, 207.65],
+    chord: [92.5, 110, 138.59, 185],
     bpm: 104,
     swing: 0.04,
     color: 'sine',
@@ -159,11 +159,13 @@ class DungeonAudio {
     const chord = track.chord[Math.floor(i / 4) % track.chord.length];
     const stepMs = (60_000 / track.bpm) / 2;
 
-    this.tone(bass, now, 0.11, 'square', 0.17, this.musicBus, 420);
-    if (i % 2 === 0) this.tone(chord, now + 0.015, 0.2, 'sawtooth', this.mode === 'boss' ? 0.08 : 0.045, this.musicBus, this.mode === 'boss' ? 620 : 980);
-    if (i % (this.mode === 'battle' ? 1 : 2) === 0) this.tone(lead, now + 0.04, 0.08, track.color, this.mode === 'shop' ? 0.08 : 0.105, this.musicBus, 1800);
+    this.tone(bass, now, this.mode === 'boss' ? 0.18 : 0.12, 'square', 0.24, this.musicBus, this.mode === 'boss' ? 320 : 520);
+    if (i % 2 === 0) this.tone(chord, now + 0.015, 0.22, 'sawtooth', this.mode === 'boss' ? 0.12 : 0.07, this.musicBus, this.mode === 'boss' ? 540 : 860);
+    if (i % (this.mode === 'battle' ? 1 : 2) === 0) this.tone(lead, now + 0.04, 0.075, track.color, this.mode === 'shop' ? 0.12 : 0.145, this.musicBus, 2200);
+    if ((this.mode === 'battle' || this.mode === 'boss') && i % 4 === 3) this.tone(lead * 2, now + 0.07, 0.045, 'square', 0.09, this.musicBus, 3200);
     if (this.step % track.kickEvery === 0) this.kick(now);
-    if (track.snareAt.includes(i)) this.noise(now + 0.02, 0.045, 0.08, this.musicBus, 1400, 'highpass');
+    if (i % 4 === 2) this.noise(now + 0.015, 0.025, 0.035, this.musicBus, 4200, 'highpass');
+    if (track.snareAt.includes(i)) this.noise(now + 0.02, 0.065, 0.13, this.musicBus, 1400, 'highpass');
     if (this.mode === 'boss' && i % 8 === 7) this.tone(36.7, now + 0.04, 0.28, 'sawtooth', 0.16, this.musicBus, 260);
 
     this.step += 1;

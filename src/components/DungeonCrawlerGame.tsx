@@ -4,6 +4,7 @@ import { BOSSES, DUNGEON_TITLES, MONSTERS, RELICS, ROOM_EVENTS, pickBySeed } fro
 import { DUNGEON_FX, DUNGEON_TRACK_LABELS, dungeonAsset } from '../dungeonAssets';
 import { getDungeonAudio } from '../dungeonAudio';
 import type { DungeonMusicMode } from '../dungeonAudio';
+import { getVaporSynth } from '../vaporSynth';
 import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState } from '../types';
 import { loadDungeonState, resetDungeonState, saveDungeonState } from '../storage';
 
@@ -131,11 +132,22 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   }, [state]);
 
   useEffect(() => {
+    getVaporSynth().setDucked(true);
     const audio = getDungeonAudio();
     const mode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
     audio.start(mode);
     audio.setMode(mode);
-    return () => audio.stop();
+    return () => {
+      audio.stop();
+      getVaporSynth().setDucked(false);
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = getDungeonAudio();
+    const mode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
+    audio.setMode(mode);
+    void audio.unlock(mode);
   }, [state.run.active, state.run.roomType]);
 
   const currentEnemy = useMemo(() => {
