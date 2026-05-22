@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BOSSES, DUNGEON_TITLES, MONSTERS, RELICS, ROOM_EVENTS, pickBySeed } from '../dungeonContent';
 import { DUNGEON_FX, DUNGEON_TRACK_LABELS, dungeonAsset } from '../dungeonAssets';
+import { DoctrineQuestion, doctrineForSeed } from '../dungeonDoctrine';
 import { getDungeonAudio } from '../dungeonAudio';
 import type { DungeonMusicMode } from '../dungeonAudio';
 import { getVaporSynth } from '../vaporSynth';
@@ -42,6 +43,18 @@ function relicOffers(room: number): string[] {
 
 function appendLog(state: DungeonState, line: string): DungeonState {
   return { ...state, run: { ...state.run, log: [line, ...state.run.log].slice(0, 9) } };
+}
+
+function enemyMaxHp(enemy: DungeonEnemy, room: number, boss = false): number {
+  return boss
+    ? Math.floor(enemy.hp * 3.2 + room * 18 + Math.pow(Math.max(1, room / 5), 2) * 10)
+    : Math.floor(enemy.hp + room * 4 + Math.pow(room, 1.18));
+}
+
+function enemyAttackPower(enemy: DungeonEnemy, room: number, boss = false): number {
+  return boss
+    ? Math.floor(enemy.attack * 1.8 + room * 1.4)
+    : Math.floor(enemy.attack + room * 0.55);
 }
 
 function applyRelic(player: DungeonState['player'], relic: DungeonRelic): DungeonState['player'] {
@@ -126,6 +139,8 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const [pulse, setPulse] = useState(false);
   const [panel, setPanel] = useState<'run' | 'relics' | 'bestiary' | 'titles'>('run');
   const [fx, setFx] = useState<keyof typeof DUNGEON_FX | null>(null);
+  const [doctrine, setDoctrine] = useState<DoctrineQuestion | null>(null);
+  const [doctrineSolved, setDoctrineSolved] = useState(false);
 
   useEffect(() => {
     saveDungeonState(state);
@@ -179,6 +194,16 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     void getDungeonAudio().unlock(mode);
   };
 
+  useEffect(() => {
+    if (state.run.active && state.run.roomType === 'boss' && currentEnemy) {
+      setDoctrine(doctrineForSeed(state.run.room * 101 + currentEnemy.name.length));
+      setDoctrineSolved(false);
+    } else {
+      setDoctrine(null);
+      setDoctrineSolved(false);
+    }
+  }, [state.run.active, state.run.room, state.run.roomType, currentEnemy?.id]);
+
   const startRun = () => {
     const audio = getDungeonAudio();
     void audio.unlock('crawl');
@@ -199,6 +224,12 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   const attack = () => {
     if (!currentEnemy) return;
+    if (state.run.roomType === 'boss' && !doctrineSolved) {
+      flashFx('boss');
+      getDungeonAudio().sfx('boss');
+      onShowToast('Boss ward active: answer the doctrine check first');
+      return;
+    }
     const audio = getDungeonAudio();
     void audio.unlock(state.run.roomType === 'boss' ? 'boss' : 'battle');
     audio.sfx('hit');
@@ -206,10 +237,12 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     setPulse(true);
     window.setTimeout(() => setPulse(false), 220);
     setState(prev => {
-      const enemyMax = currentEnemy.hp + Math.floor(prev.run.room * 2.5);
+      const isBoss = prev.run.roomType === 'boss';
+      const enemyMax = enemyMaxHp(currentEnemy, prev.run.room, isBoss);
       const enemyRemaining = Number(prev.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? enemyMax);
       const didCrit = Math.random() * 100 < prev.player.crit;
-      const playerDamage = Math.max(1, prev.player.attack + Math.floor(prev.player.level / 2) - currentEnemy.defense + (didCrit ? prev.player.attack : 0));
+      const bossGuard = isBoss ? 0.62 : 1;
+      const playerDamage = Math.max(1, Math.floor((prev.player.attack + Math.floor(prev.player.level / 2) - currentEnemy.defense + (didCrit ? prev.player.attack : 0)) * bossGuard));
       const enemyNext = enemyRemaining - playerDamage;
       let next = appendLog(prev, `${didCrit ? 'CRIT! ' : ''}${currentEnemy.name} TAKES ${playerDamage}`);
       next.run.log = next.run.log.filter(l => !l.startsWith('ENEMY_HP:'));
@@ -241,7 +274,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         getDungeonAudio().sfx(prev.run.roomType === 'boss' ? 'level' : 'loot');
         return next;
       }
-      const enemyDamage = Math.max(0, currentEnemy.attack + Math.floor(prev.run.room / 3) - prev.player.defense);
+      const enemyDamage = Math.max(1, enemyAttackPower(currentEnemy, prev.run.room, isBoss) - prev.player.defense);
       const blocked = enemyDamage === 0;
       const hp = prev.player.hp - enemyDamage;
       if (hp <= 0) {
@@ -296,6 +329,75 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         discoveredRelicIds: uniq([...prev.discoveredRelicIds, relic.id]),
         run: { ...prev.run, offeredRelicIds: [] },
       }, `${relic.name} ACQUIRED${cost ? ` FOR ${cost} COINS` : ''}`);
+    });
+    setDoctrineSolved(false);
+    if (state.run.roomType === 'boss' && currentEnemy) {
+      setDoctrine(doctrineForSeed(state.run.room * 101 + enemyHp + currentEnemy.attack));
+    }
+  };
+
+  const answerDoctrine = (index: number) => {
+    if (!currentEnemy || !doctrine) return;
+    const audio = getDungeonAudio();
+    void audio.unlock('boss');
+    const correct = index === doctrine.answer;
+    setDoctrineSolved(correct);
+    flashFx(correct ? 'level' : 'curse');
+    audio.sfx(correct ? 'level' : 'curse');
+    setState(prev => {
+      const isBoss = prev.run.roomType === 'boss';
+      if (!isBoss) return prev;
+      const enemyMax = enemyMaxHp(currentEnemy, prev.run.room, true);
+      const enemyRemaining = Number(prev.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? enemyMax);
+      const nextLog = prev.run.log.filter(l => !l.startsWith('ENEMY_HP:'));
+      if (correct) {
+        const doctrineDamage = Math.max(8, Math.floor(enemyMax * 0.13) + prev.player.level * 2);
+        return {
+          ...prev,
+          player: {
+            ...prev.player,
+            hp: Math.min(prev.player.maxHp, prev.player.hp + 6),
+            crit: prev.player.crit + 1,
+          },
+          run: {
+            ...prev.run,
+            log: [
+              `ENEMY_HP:${Math.max(1, enemyRemaining - doctrineDamage)}`,
+              `DOCTRINE CORRECT: ${doctrine.lesson}`,
+              `BOSS WARD CRACKS FOR ${doctrineDamage}`,
+              ...nextLog,
+            ].slice(0, 9),
+          },
+        };
+      }
+      const damage = Math.max(6, enemyAttackPower(currentEnemy, prev.run.room, true) + 8 - prev.player.defense);
+      const hp = prev.player.hp - damage;
+      if (hp <= 0) {
+        return {
+          ...prev,
+          player: { ...prev.player, hp: prev.player.maxHp },
+          run: {
+            active: false,
+            room: 0,
+            roomType: 'fight',
+            offeredRelicIds: [],
+            log: [`DOCTRINE FAILED. ${currentEnemy.name} ERASED THE RUN.`, doctrine.lesson, ...nextLog].slice(0, 9),
+          },
+        };
+      }
+      return {
+        ...prev,
+        player: { ...prev.player, hp },
+        run: {
+          ...prev.run,
+          log: [
+            `ENEMY_HP:${enemyRemaining}`,
+            `DOCTRINE WRONG: ${doctrine.lesson}`,
+            `${currentEnemy.name} PUNISHES BAD PROGRAMMING FOR ${damage}`,
+            ...nextLog,
+          ].slice(0, 9),
+        },
+      };
     });
   };
 
@@ -362,7 +464,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   };
 
   const enemyHp = currentEnemy
-    ? Number(state.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? currentEnemy.hp + Math.floor(state.run.room * 2.5))
+    ? Number(state.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? enemyMaxHp(currentEnemy, state.run.room, state.run.roomType === 'boss'))
     : 0;
 
   return createPortal((
@@ -425,9 +527,24 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
               {currentEnemy ? (
                 <>
                   <div className="mb-3 h-3 rounded border border-vapor-red/70 bg-black">
-                    <div className="h-full bg-gradient-to-r from-vapor-red to-vapor-pink" style={{ width: `${Math.max(0, Math.min(100, enemyHp / (currentEnemy.hp + Math.floor(state.run.room * 2.5)) * 100))}%` }} />
+                    <div className="h-full bg-gradient-to-r from-vapor-red to-vapor-pink" style={{ width: `${Math.max(0, Math.min(100, enemyHp / enemyMaxHp(currentEnemy, state.run.room, state.run.roomType === 'boss') * 100))}%` }} />
                   </div>
-                  <button onClick={attack} className="btn-primary w-full py-3 text-base">{state.run.roomType === 'boss' ? 'Fight Boss' : 'Throw Haunted Dumbbell'}</button>
+                  {state.run.roomType === 'boss' && doctrine && !doctrineSolved ? (
+                    <div className="rounded border border-vapor-yellow bg-vapor-yellow/10 p-3">
+                      <p className="text-[11px] font-bold tracking-[0.22em] text-vapor-yellow">PHD LIFTING DOCTRINE CHECK</p>
+                      <p className="mt-2 text-sm text-vapor-text">{doctrine.prompt}</p>
+                      <div className="mt-3 grid gap-2">
+                        {doctrine.options.map((option, index) => (
+                          <button key={option} onClick={() => answerDoctrine(index)} className="dungeon-loot text-left">
+                            <span className="text-vapor-yellow">{String.fromCharCode(65 + index)}</span>
+                            <span><b>{option}</b></span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={attack} className="btn-primary w-full py-3 text-base">{state.run.roomType === 'boss' ? 'Exploit Boss Opening' : 'Throw Haunted Dumbbell'}</button>
+                  )}
                 </>
               ) : offers.length > 0 ? (
                 <div className="grid gap-2">
