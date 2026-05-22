@@ -1,6 +1,7 @@
 import { loadSettings } from './storage';
+import { getAudioContext, getSfxMuted, getSfxVolume } from './audio';
 
-type DungeonMusicMode = 'crawl' | 'battle' | 'boss' | 'victory' | 'shop';
+export type DungeonMusicMode = 'crawl' | 'battle' | 'boss' | 'victory' | 'shop';
 type DungeonSfx = 'hit' | 'crit' | 'block' | 'loot' | 'curse' | 'heal' | 'boss' | 'level' | 'death' | 'shrine' | 'coin';
 
 type TrackStep = {
@@ -78,10 +79,8 @@ class DungeonAudio {
 
   private ensure(): AudioContext | null {
     try {
-      const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!Ctor) return null;
       if (!this.ctx) {
-        this.ctx = new Ctor();
+        this.ctx = getAudioContext();
         this.musicBus = this.ctx.createGain();
         this.sfxBus = this.ctx.createGain();
         this.musicBus.connect(this.ctx.destination);
@@ -99,15 +98,39 @@ class DungeonAudio {
     if (!this.ctx || !this.musicBus || !this.sfxBus) return;
     const settings = loadSettings();
     const musicVol = Math.max(0, Math.min(100, settings.musicVolume ?? 30)) / 100;
-    const sfxVol = settings.soundEffectsMuted ? 0 : Math.max(0, Math.min(100, settings.soundEffectsVolume ?? 75)) / 100;
-    this.musicBus.gain.setTargetAtTime(musicVol * 0.11, this.ctx.currentTime, 0.02);
-    this.sfxBus.gain.setTargetAtTime(sfxVol * 0.2, this.ctx.currentTime, 0.01);
+    const sfxMuted = getSfxMuted() || settings.soundEffectsMuted;
+    const sfxVol = sfxMuted ? 0 : Math.max(0, Math.min(100, getSfxVolume() || settings.soundEffectsVolume || 75)) / 100;
+    this.musicBus.gain.setTargetAtTime(musicVol * 0.28, this.ctx.currentTime, 0.02);
+    this.sfxBus.gain.setTargetAtTime(sfxVol * 0.36, this.ctx.currentTime, 0.01);
+  }
+
+  async unlock(mode: DungeonMusicMode = this.mode): Promise<boolean> {
+    this.mode = mode;
+    const ctx = this.ensure();
+    if (!ctx || !this.musicBus) return false;
+    try {
+      if (ctx.state === 'suspended') await ctx.resume();
+    } catch {
+      return false;
+    }
+    this.applySettings();
+    if (!this.running) {
+      this.running = true;
+      this.step = 0;
+      this.schedule();
+    }
+    this.tone(880, ctx.currentTime + 0.01, 0.045, 'triangle', 0.035, this.musicBus, 2400);
+    return ctx.state === 'running';
   }
 
   start(mode: DungeonMusicMode = 'crawl') {
     this.mode = mode;
     const ctx = this.ensure();
-    if (!ctx || this.running) return;
+    if (!ctx) return;
+    if (this.running) {
+      this.applySettings();
+      return;
+    }
     this.running = true;
     this.step = 0;
     this.schedule();
@@ -205,7 +228,7 @@ class DungeonAudio {
     const ctx = this.ensure();
     if (!ctx || !this.sfxBus) return;
     const settings = loadSettings();
-    if (settings.soundEffectsMuted || (settings.soundEffectsVolume ?? 75) <= 0) return;
+    if (getSfxMuted() || settings.soundEffectsMuted || (getSfxVolume() || settings.soundEffectsVolume || 75) <= 0) return;
     const now = ctx.currentTime;
     const map: Record<DungeonSfx, [number, number, OscillatorType]> = {
       hit: [110, 55, 'square'],

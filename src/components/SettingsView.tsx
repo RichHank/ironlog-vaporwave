@@ -6,6 +6,7 @@ import BodyMeasurements from './BodyMeasurements';
 import PlateCalculator from './PlateCalculator';
 import StravaSection from './StravaSection';
 import { getVaporSynth } from '../vaporSynth';
+import { getDungeonAudio } from '../dungeonAudio';
 import { FONT_PRESETS, applyFontScale } from '../fontScale';
 import DungeonCrawlerGame from './DungeonCrawlerGame';
 
@@ -155,7 +156,10 @@ export default function SettingsView({ onShowToast }: Props) {
             {settings.gymDungeonEnabled && (
               <div className="mt-3 rounded border border-vapor-cyan/40 bg-black/40 p-3">
                 <p className="text-xs text-vapor-cyan">Dungeon signal detected. Enter at your own pump.</p>
-                <button onClick={() => setShowDungeon(true)} className="btn-primary mt-3 w-full py-3 text-sm">
+                <button onClick={() => {
+                  void getDungeonAudio().unlock('crawl');
+                  setShowDungeon(true);
+                }} className="btn-primary mt-3 w-full py-3 text-sm">
                   Enter Swolecrypt
                 </button>
               </div>

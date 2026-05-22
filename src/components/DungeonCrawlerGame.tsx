@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { BOSSES, DUNGEON_TITLES, MONSTERS, RELICS, ROOM_EVENTS, pickBySeed } from '../dungeonContent';
 import { DUNGEON_FX, DUNGEON_TRACK_LABELS, dungeonAsset } from '../dungeonAssets';
 import { getDungeonAudio } from '../dungeonAudio';
+import type { DungeonMusicMode } from '../dungeonAudio';
 import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState } from '../types';
 import { loadDungeonState, resetDungeonState, saveDungeonState } from '../storage';
 
@@ -147,7 +148,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     return pickBySeed(events.length ? events : ROOM_EVENTS, state.run.room * 23 + state.player.level);
   }, [state.run.room, state.run.roomType, state.player.level]);
 
-  const trackMode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
+  const trackMode: DungeonMusicMode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
 
   const relics = useMemo(() =>
     state.relicIds.map(id => RELICS.find(r => r.id === id)).filter((r): r is DungeonRelic => !!r)
@@ -162,8 +163,14 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     window.setTimeout(() => setFx(null), 520);
   };
 
+  const wakeDungeon = (mode: DungeonMusicMode = trackMode) => {
+    void getDungeonAudio().unlock(mode);
+  };
+
   const startRun = () => {
-    getDungeonAudio().sfx('boss');
+    const audio = getDungeonAudio();
+    void audio.unlock('crawl');
+    audio.sfx('boss');
     flashFx('boss');
     setState(prev => enterRoom({
       ...prev,
@@ -174,12 +181,15 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   };
 
   const nextRoom = () => {
+    wakeDungeon();
     setState(prev => enterRoom(prev, prev.run.room + 1));
   };
 
   const attack = () => {
     if (!currentEnemy) return;
-    getDungeonAudio().sfx('hit');
+    const audio = getDungeonAudio();
+    void audio.unlock(state.run.roomType === 'boss' ? 'boss' : 'battle');
+    audio.sfx('hit');
     flashFx('hit');
     setPulse(true);
     window.setTimeout(() => setPulse(false), 220);
@@ -254,12 +264,16 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   const chooseRelic = (relic: DungeonRelic, cost = 0) => {
     if (state.player.coins < cost) {
-      getDungeonAudio().sfx('curse');
+      const audio = getDungeonAudio();
+      void audio.unlock(trackMode);
+      audio.sfx('curse');
       onShowToast('Not enough crypt coins');
       return;
     }
     const fxKind = relic.kind === 'curse' || relic.kind === 'glitch' ? 'curse' : 'loot';
-    getDungeonAudio().sfx(fxKind);
+    const audio = getDungeonAudio();
+    void audio.unlock(trackMode);
+    audio.sfx(fxKind);
     flashFx(fxKind);
     setState(prev => {
       const applied = applyRelic(prev.player, relic);
@@ -275,6 +289,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   const resolveRoom = () => {
     const audio = getDungeonAudio();
+    void audio.unlock(trackMode);
     setState(prev => {
       if (prev.run.log.includes('ROOM_RESOLVED')) return prev;
       if (prev.run.roomType === 'trap') {
@@ -305,7 +320,9 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   const claimBonus = () => {
     if (!state.pendingWorkoutBonus) return;
-    getDungeonAudio().sfx('level');
+    const audio = getDungeonAudio();
+    void audio.unlock(trackMode);
+    audio.sfx('level');
     flashFx('level');
     setState(prev => {
       if (!prev.pendingWorkoutBonus) return prev;
@@ -324,7 +341,9 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   const hardReset = () => {
     if (!window.confirm('Erase Swolecrypt progress? Workout data is untouched.')) return;
-    getDungeonAudio().sfx('death');
+    const audio = getDungeonAudio();
+    void audio.unlock(trackMode);
+    audio.sfx('death');
     flashFx('death');
     setState(resetDungeonState());
     onShowToast('Swolecrypt reset');
