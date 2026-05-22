@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BOSSES, DUNGEON_TITLES, MONSTERS, RELICS, ROOM_EVENTS, pickBySeed } from '../dungeonContent';
+import { DUNGEON_FX, DUNGEON_TRACK_LABELS, dungeonAsset } from '../dungeonAssets';
 import { getDungeonAudio } from '../dungeonAudio';
 import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState } from '../types';
 import { loadDungeonState, resetDungeonState, saveDungeonState } from '../storage';
@@ -95,33 +96,34 @@ function enterRoom(state: DungeonState, room: number): DungeonState {
   };
 }
 
+function assetKindForEnemy(enemy: DungeonEnemy): 'monsters' | 'bosses' {
+  return BOSSES.some(b => b.id === enemy.id) ? 'bosses' : 'monsters';
+}
+
 function PixelSprite({ enemy, relic, pulse = false }: { enemy?: DungeonEnemy; relic?: DungeonRelic; pulse?: boolean }) {
   const palette = paletteMap[enemy?.palette ?? 'cyan'];
-  const label = enemy?.sprite ?? relic?.sprite ?? '💀';
+  const src = enemy
+    ? dungeonAsset(assetKindForEnemy(enemy), enemy.id)
+    : relic
+      ? dungeonAsset('relics', relic.id)
+      : dungeonAsset('fx', 'portal-open');
+  const label = enemy?.name ?? relic?.name ?? 'Swolecrypt portal';
   return (
     <div className={`dungeon-sprite ${pulse ? 'dungeon-sprite-hit' : ''}`} style={{ ['--sprite-a' as string]: palette.a, ['--sprite-b' as string]: palette.b }}>
-      <svg viewBox="0 0 120 120" className="h-28 w-28">
-        <defs>
-          <filter id={`glow-${label}`} x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-          </filter>
-        </defs>
-        <rect x="18" y="24" width="84" height="72" rx="8" fill="rgba(5,5,10,.92)" stroke={palette.a} strokeWidth="3" filter={`url(#glow-${label})`} />
-        <path d="M30 86 L42 50 L60 72 L78 40 L92 86 Z" fill={palette.a} opacity=".35" />
-        <circle cx="45" cy="52" r="7" fill={palette.b} />
-        <circle cx="75" cy="52" r="7" fill={palette.b} />
-        <rect x="42" y="76" width="36" height="6" fill={palette.c} opacity=".8" />
-        <text x="60" y="70" textAnchor="middle" fontSize="34" filter={`url(#glow-${label})`}>{label}</text>
-      </svg>
+      <img src={src} alt={label} className="dungeon-pixel-art h-32 w-32" draggable={false} />
     </div>
   );
+}
+
+function MiniAsset({ kind, id, label }: { kind: 'monsters' | 'bosses' | 'relics' | 'rooms' | 'fx'; id: string; label: string }) {
+  return <img src={dungeonAsset(kind, id)} alt={label} className="dungeon-mini-asset" draggable={false} loading="lazy" />;
 }
 
 export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const [state, setState] = useState<DungeonState>(() => loadDungeonState());
   const [pulse, setPulse] = useState(false);
   const [panel, setPanel] = useState<'run' | 'relics' | 'bestiary' | 'titles'>('run');
+  const [fx, setFx] = useState<keyof typeof DUNGEON_FX | null>(null);
 
   useEffect(() => {
     saveDungeonState(state);
@@ -129,19 +131,23 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   useEffect(() => {
     const audio = getDungeonAudio();
-    audio.start(state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : 'crawl');
-    audio.setMode(state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl');
+    const mode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
+    audio.start(mode);
+    audio.setMode(mode);
     return () => audio.stop();
-  }, [state.run.roomType]);
+  }, [state.run.active, state.run.roomType]);
 
   const currentEnemy = useMemo(() => {
     const id = state.run.bossId ?? state.run.enemyId;
     return [...MONSTERS, ...BOSSES].find(e => e.id === id) ?? null;
   }, [state.run.bossId, state.run.enemyId]);
 
-  const roomEvent = useMemo(() =>
-    ROOM_EVENTS.find(e => e.type === state.run.roomType) ?? ROOM_EVENTS[0]
-  , [state.run.roomType]);
+  const roomEvent = useMemo(() => {
+    const events = ROOM_EVENTS.filter(e => e.type === state.run.roomType);
+    return pickBySeed(events.length ? events : ROOM_EVENTS, state.run.room * 23 + state.player.level);
+  }, [state.run.room, state.run.roomType, state.player.level]);
+
+  const trackMode = !state.run.active ? 'crawl' : state.run.roomType === 'boss' ? 'boss' : state.run.roomType === 'fight' ? 'battle' : state.run.roomType === 'merchant' ? 'shop' : 'crawl';
 
   const relics = useMemo(() =>
     state.relicIds.map(id => RELICS.find(r => r.id === id)).filter((r): r is DungeonRelic => !!r)
@@ -151,8 +157,14 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     state.run.offeredRelicIds.map(id => RELICS.find(r => r.id === id)).filter((r): r is DungeonRelic => !!r)
   , [state.run.offeredRelicIds]);
 
+  const flashFx = (kind: keyof typeof DUNGEON_FX) => {
+    setFx(kind);
+    window.setTimeout(() => setFx(null), 520);
+  };
+
   const startRun = () => {
     getDungeonAudio().sfx('boss');
+    flashFx('boss');
     setState(prev => enterRoom({
       ...prev,
       player: { ...prev.player, hp: prev.player.maxHp },
@@ -168,6 +180,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const attack = () => {
     if (!currentEnemy) return;
     getDungeonAudio().sfx('hit');
+    flashFx('hit');
     setPulse(true);
     window.setTimeout(() => setPulse(false), 220);
     setState(prev => {
@@ -202,6 +215,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
             ].slice(0, 9),
           },
         };
+        flashFx(prev.run.roomType === 'boss' ? 'level' : 'loot');
         getDungeonAudio().sfx(prev.run.roomType === 'boss' ? 'level' : 'loot');
         return next;
       }
@@ -209,6 +223,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
       const blocked = enemyDamage === 0;
       const hp = prev.player.hp - enemyDamage;
       if (hp <= 0) {
+        flashFx('death');
         getDungeonAudio().sfx('death');
         return {
           ...next,
@@ -222,7 +237,10 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
           },
         };
       }
-      if (blocked) getDungeonAudio().sfx('block');
+      if (blocked) {
+        flashFx('block');
+        getDungeonAudio().sfx('block');
+      }
       return {
         ...next,
         player: { ...next.player, hp },
@@ -240,14 +258,19 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
       onShowToast('Not enough crypt coins');
       return;
     }
-    getDungeonAudio().sfx(relic.kind === 'curse' || relic.kind === 'glitch' ? 'curse' : 'loot');
-    setState(prev => appendLog({
-      ...prev,
-      player: { ...applyRelic(prev.player, relic), coins: applyRelic(prev.player, relic).coins - cost },
-      relicIds: uniq([...prev.relicIds, relic.id]),
-      discoveredRelicIds: uniq([...prev.discoveredRelicIds, relic.id]),
-      run: { ...prev.run, offeredRelicIds: [] },
-    }, `${relic.name} ACQUIRED${cost ? ` FOR ${cost} COINS` : ''}`));
+    const fxKind = relic.kind === 'curse' || relic.kind === 'glitch' ? 'curse' : 'loot';
+    getDungeonAudio().sfx(fxKind);
+    flashFx(fxKind);
+    setState(prev => {
+      const applied = applyRelic(prev.player, relic);
+      return appendLog({
+        ...prev,
+        player: { ...applied, coins: applied.coins - cost },
+        relicIds: uniq([...prev.relicIds, relic.id]),
+        discoveredRelicIds: uniq([...prev.discoveredRelicIds, relic.id]),
+        run: { ...prev.run, offeredRelicIds: [] },
+      }, `${relic.name} ACQUIRED${cost ? ` FOR ${cost} COINS` : ''}`);
+    });
   };
 
   const resolveRoom = () => {
@@ -256,20 +279,24 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
       if (prev.run.log.includes('ROOM_RESOLVED')) return prev;
       if (prev.run.roomType === 'trap') {
         audio.sfx('curse');
+        flashFx('curse');
         const damage = Math.max(3, Math.floor(prev.run.room * 1.7));
         const hp = Math.max(1, prev.player.hp - damage);
         return appendLog({ ...prev, player: { ...prev.player, hp }, run: { ...prev.run, log: ['ROOM_RESOLVED', ...prev.run.log] } }, `TRAP BITES FOR ${damage} HP`);
       }
       if (prev.run.roomType === 'shrine') {
         audio.sfx('shrine');
+        flashFx('heal');
         return appendLog({ ...prev, player: { ...prev.player, attack: prev.player.attack + 1, crit: prev.player.crit + 1, hp: Math.max(1, prev.player.hp - 4) }, run: { ...prev.run, log: ['ROOM_RESOLVED', ...prev.run.log] } }, 'SHRINE GRANTS POWER, STEALS COMFORT');
       }
       if (prev.run.roomType === 'rest') {
         audio.sfx('heal');
+        flashFx('heal');
         return appendLog({ ...prev, player: { ...prev.player, hp: Math.min(prev.player.maxHp, prev.player.hp + 22) }, run: { ...prev.run, log: ['ROOM_RESOLVED', ...prev.run.log] } }, 'REST SITE APPLIES HAUNTED FOAM ROLLER');
       }
       if (prev.run.roomType === 'glitch') {
         audio.sfx('coin');
+        flashFx('coin');
         return appendLog({ ...prev, player: { ...prev.player, coins: prev.player.coins + 18, crit: prev.player.crit + 1 }, run: { ...prev.run, log: ['ROOM_RESOLVED', ...prev.run.log] } }, 'GLITCH ROOM DUPES 18 COINS');
       }
       return prev;
@@ -279,6 +306,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const claimBonus = () => {
     if (!state.pendingWorkoutBonus) return;
     getDungeonAudio().sfx('level');
+    flashFx('level');
     setState(prev => {
       if (!prev.pendingWorkoutBonus) return prev;
       const { player, leveled } = grantXp({
@@ -297,6 +325,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const hardReset = () => {
     if (!window.confirm('Erase Swolecrypt progress? Workout data is untouched.')) return;
     getDungeonAudio().sfx('death');
+    flashFx('death');
     setState(resetDungeonState());
     onShowToast('Swolecrypt reset');
   };
@@ -323,6 +352,10 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
           <div className="dungeon-stat">LVL<br/><span>{state.player.level}</span></div>
           <div className="dungeon-stat">COIN<br/><span>{state.player.coins}</span></div>
         </div>
+        <div className="dungeon-track mt-2">
+          <span>♪ {DUNGEON_TRACK_LABELS[trackMode]}</span>
+          <i /><i /><i /><i /><i />
+        </div>
       </div>
 
       <div className="relative z-10 flex-1 overflow-y-auto px-3 py-4">
@@ -333,6 +366,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         )}
 
         <div className="dungeon-card p-4">
+          {fx && <img src={DUNGEON_FX[fx]} alt="" className="dungeon-fx-burst" draggable={false} />}
           {!state.run.active ? (
             <div className="text-center">
               <div className="mx-auto mb-3 flex justify-center"><PixelSprite enemy={BOSSES[0]} /></div>
@@ -347,11 +381,14 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
                   <h3 className="text-xl font-black text-vapor-pink">{currentEnemy?.name ?? roomEvent.title}</h3>
                   <p className="mt-1 text-xs text-vapor-muted">{currentEnemy?.taunt ?? roomEvent.text}</p>
                 </div>
-                <div className="text-4xl">{currentEnemy?.sprite ?? roomEvent.sprite}</div>
+                <MiniAsset kind="rooms" id={roomEvent.id} label={roomEvent.title} />
               </div>
 
-              <div className="my-4 flex justify-center">
-                <PixelSprite enemy={currentEnemy ?? undefined} pulse={pulse} />
+              <div className="dungeon-stage my-4">
+                <img src={dungeonAsset('rooms', roomEvent.id)} alt="" className="dungeon-room-backdrop" draggable={false} />
+                <div className="relative z-10 flex justify-center">
+                  {currentEnemy ? <PixelSprite enemy={currentEnemy} pulse={pulse} /> : <MiniAsset kind="rooms" id={roomEvent.id} label={roomEvent.title} />}
+                </div>
               </div>
 
               {currentEnemy ? (
@@ -367,7 +404,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
                     const cost = state.run.roomType === 'merchant' ? 22 + state.run.room * 2 : 0;
                     return (
                       <button key={relic.id} onClick={() => chooseRelic(relic, cost)} className="dungeon-loot text-left">
-                        <span className="text-2xl">{relic.sprite}</span>
+                        <MiniAsset kind="relics" id={relic.id} label={relic.name} />
                         <span><b>{relic.name}</b>{cost ? ` // ${cost} COINS` : ''}<br/><small>{relic.description}</small></span>
                       </button>
                     );
@@ -402,7 +439,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
           {panel === 'relics' && (
             <div className="grid gap-2">
               {relics.length === 0 ? <p className="text-xs text-vapor-muted">NO RELICS. SPIRITUALLY UNSWOLE.</p> : relics.map(r => (
-                <div key={r.id} className="dungeon-loot"><span className="text-xl">{r.sprite}</span><span><b>{r.name}</b><br/><small>{r.description}</small></span></div>
+                <div key={r.id} className="dungeon-loot"><MiniAsset kind="relics" id={r.id} label={r.name} /><span><b>{r.name}</b><br/><small>{r.description}</small></span></div>
               ))}
             </div>
           )}
@@ -410,7 +447,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
             <div className="grid grid-cols-2 gap-2 text-xs">
               {state.discoveredMonsterIds.length === 0 ? <p className="text-vapor-muted">DEFEAT CREATURES TO FILL THE CURSED DEX.</p> : state.discoveredMonsterIds.map(id => {
                 const e = [...MONSTERS, ...BOSSES].find(m => m.id === id);
-                return e ? <div key={id} className="rounded border border-vapor-purple p-2"><span className="text-xl">{e.sprite}</span> {e.name}</div> : null;
+                return e ? <div key={id} className="rounded border border-vapor-purple p-2"><MiniAsset kind={assetKindForEnemy(e)} id={e.id} label={e.name} /> <span>{e.name}</span></div> : null;
               })}
             </div>
           )}
