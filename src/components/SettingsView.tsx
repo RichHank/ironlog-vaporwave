@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { exportAllJSON, exportHistoryCSV, downloadFile, clearAllData, loadSettings, saveSettings, loadHistory, saveHistory, loadRoutines, saveRoutines } from '../storage';
+import { exportAllJSON, exportHistoryCSV, downloadFile, clearAllData, loadSettings, saveSettings } from '../storage';
 import { todayStamp } from '../utils';
 import { getSfxVolume, getSfxMuted, setSfxVolume, setSfxMuted } from '../audio';
 import BodyMeasurements from './BodyMeasurements';
@@ -7,6 +7,7 @@ import PlateCalculator from './PlateCalculator';
 import StravaSection from './StravaSection';
 import { getVaporSynth } from '../vaporSynth';
 import { FONT_PRESETS, applyFontScale } from '../fontScale';
+import DungeonCrawlerGame from './DungeonCrawlerGame';
 
 type Props = {
   onShowToast: (msg: string) => void;
@@ -22,6 +23,7 @@ export default function SettingsView({ onShowToast }: Props) {
   const [sfxVolume, setSfxVolState] = useState(() => getSfxVolume());
   const [sfxMuted, setSfxMutedState] = useState(() => getSfxMuted());
   const [fontScale, setFontScaleState] = useState(() => loadSettings().fontScale ?? 100);
+  const [showDungeon, setShowDungeon] = useState(false);
 
   const toggleMusic = () => {
     const synth = getVaporSynth();
@@ -137,6 +139,29 @@ export default function SettingsView({ onShowToast }: Props) {
             </div>
           </div>
 
+          <div className="card p-4 overflow-hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-vapor-pink">SWOLECRYPT Dungeon Mode</p>
+                <p className="text-[11px] text-vapor-muted mt-0.5">Optional cursed gym roguelite. Monsters, loot, bosses, music, bad decisions.</p>
+              </div>
+              <button
+                onClick={() => updateSetting('gymDungeonEnabled', !settings.gymDungeonEnabled)}
+                className={`flex-shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold ${settings.gymDungeonEnabled ? 'bg-vapor-green text-black shadow-[0_0_12px_rgba(5,255,161,0.5)]' : 'bg-vapor-navy text-vapor-muted'}`}
+              >
+                {settings.gymDungeonEnabled ? 'Enabled' : 'Off'}
+              </button>
+            </div>
+            {settings.gymDungeonEnabled && (
+              <div className="mt-3 rounded border border-vapor-cyan/40 bg-black/40 p-3">
+                <p className="text-xs text-vapor-cyan">Dungeon signal detected. Enter at your own pump.</p>
+                <button onClick={() => setShowDungeon(true)} className="btn-primary mt-3 w-full py-3 text-sm">
+                  Enter Swolecrypt
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="card p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -249,13 +274,14 @@ export default function SettingsView({ onShowToast }: Props) {
                     const text = await file.text();
                     const data = JSON.parse(text);
                     if (data.history) {
-                      const { loadHistory, saveHistory, loadRoutines, saveRoutines, loadPRs, savePRs, loadMeasurements, saveMeasurements } = await import('../storage');
+                      const { loadHistory, saveHistory, loadRoutines, saveRoutines, loadPRs, savePRs, loadMeasurements, saveMeasurements, saveDungeonState } = await import('../storage');
                       const hist = loadHistory();
                       const merged = [...data.history, ...hist].filter((s: { id: string }, i: number, arr: { id: string }[]) => arr.findIndex(x => x.id === s.id) === i);
                       saveHistory(merged);
                       if (data.routines) { const r = loadRoutines(); const mr = [...data.routines, ...r].filter((rt: { id: string }, i: number, arr: { id: string }[]) => arr.findIndex(x => x.id === rt.id) === i); saveRoutines(mr); }
                       if (data.prs) { const existingPRs = loadPRs(); const mergedPRs = [...data.prs, ...existingPRs].filter((p: { id: string }, i: number, arr: { id: string }[]) => arr.findIndex(x => x.id === p.id) === i); savePRs(mergedPRs); }
                       if (data.measurements) { const existingMeas = loadMeasurements(); const mergedMeas = [...data.measurements, ...existingMeas].filter((m: { id: string }, i: number, arr: { id: string }[]) => arr.findIndex(x => x.id === m.id) === i); saveMeasurements(mergedMeas); }
+                      if (data.dungeon) saveDungeonState(data.dungeon);
                       onShowToast('Data imported');
                       window.location.reload();
                     }
@@ -275,6 +301,9 @@ export default function SettingsView({ onShowToast }: Props) {
       )}
 
       <div className="h-8" />
+      {showDungeon && settings.gymDungeonEnabled && (
+        <DungeonCrawlerGame onClose={() => setShowDungeon(false)} onShowToast={onShowToast} />
+      )}
     </div>
   );
 }

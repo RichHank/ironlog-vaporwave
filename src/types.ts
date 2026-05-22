@@ -84,4 +84,77 @@ export interface AppSettings {
   soundEffectsMuted: boolean;
   musicVolume: number;          // 0-100, default 30
   fontScale: number;            // percentage: 87.5 | 100 | 112.5 | 125, default 100
+  gymDungeonEnabled: boolean;    // hidden Swolecrypt roguelite
+}
+
+export type DungeonRoomType = 'fight' | 'loot' | 'shrine' | 'trap' | 'merchant' | 'rest' | 'glitch' | 'boss';
+
+export interface DungeonEnemy {
+  id: string;
+  name: string;
+  hp: number;
+  attack: number;
+  defense: number;
+  xp: number;
+  coins: number;
+  sprite: string;
+  palette: string;
+  taunt: string;
+}
+
+export interface DungeonRelic {
+  id: string;
+  name: string;
+  kind: 'weapon' | 'armor' | 'charm' | 'curse' | 'snack' | 'glitch';
+  description: string;
+  attack?: number;
+  defense?: number;
+  maxHp?: number;
+  crit?: number;
+  coins?: number;
+  heal?: number;
+  sprite: string;
+}
+
+export interface DungeonPlayer {
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  level: number;
+  xp: number;
+  coins: number;
+  crit: number;
+}
+
+export interface DungeonRun {
+  active: boolean;
+  room: number;
+  roomType: DungeonRoomType;
+  enemyId?: string;
+  bossId?: string;
+  offeredRelicIds: string[];
+  log: string[];
+}
+
+export interface DungeonWorkoutBonus {
+  coins: number;
+  xp: number;
+  buffAttack: number;
+  label: string;
+}
+
+export interface DungeonState {
+  player: DungeonPlayer;
+  run: DungeonRun;
+  relicIds: string[];
+  discoveredMonsterIds: string[];
+  discoveredRelicIds: string[];
+  unlockedTitles: string[];
+  pendingWorkoutBonus?: DungeonWorkoutBonus;
+  totalRuns: number;
+  bossesDefeated: number;
+  deepestRoom: number;
+  createdAt: number;
+  updatedAt: number;
 }

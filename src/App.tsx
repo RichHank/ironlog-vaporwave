@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { WorkoutSession, WorkoutSet, ExerciseLog, Routine } from './types';
-import { generateId, loadSession, saveSession, clearSession, loadHistory, addWorkout, saveHistory, recalcPRs, updatePRsAfterAdd, loadSettings, hydrateFromIDB, upsertRoutine } from './storage';
+import { generateId, loadSession, saveSession, clearSession, loadHistory, addWorkout, saveHistory, recalcPRs, updatePRsAfterAdd, loadSettings, hydrateFromIDB, upsertRoutine, grantDungeonWorkoutBonus } from './storage';
 import { setupVisibilitySync } from './idb-storage';
 import { readOAuthCallback, completeOAuth, clearOAuthCallback, loadTokens, pushWorkout } from './strava';
 import type { ShareOutcome } from './share';
@@ -281,9 +281,10 @@ export default function App() {
     setHistory(updated);
     setSession(null);
     updatePRsAfterAdd(completed);
+    const dungeonBonus = grantDungeonWorkoutBonus(completed);
     clearSession();
     timer.reset();
-    showToast('Workout saved!');
+    showToast(dungeonBonus ? `Workout saved! Swolecrypt +${dungeonBonus.coins} coins` : 'Workout saved!');
     setView('history');
 
     // Auto-push to Strava if connected (fire-and-forget)
