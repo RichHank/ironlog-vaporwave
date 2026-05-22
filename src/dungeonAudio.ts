@@ -73,9 +73,11 @@ class DungeonAudio {
   private musicBus: GainNode | null = null;
   private sfxBus: GainNode | null = null;
   private timer: number | null = null;
+  private restoreTimer: number | null = null;
   private mode: DungeonMusicMode = 'crawl';
   private step = 0;
   private running = false;
+  private switching = false;
 
   private ensure(): AudioContext | null {
     try {
@@ -94,17 +96,61 @@ class DungeonAudio {
     }
   }
 
+  private musicTargetGain(): number {
+    const settings = loadSettings();
+    const musicVol = Math.max(0, Math.min(100, settings.musicVolume ?? 30)) / 100;
+    return musicVol * 0.28;
+  }
+
   private applySettings() {
     if (!this.ctx || !this.musicBus || !this.sfxBus) return;
     const settings = loadSettings();
-    const musicVol = Math.max(0, Math.min(100, settings.musicVolume ?? 30)) / 100;
     const sfxMuted = getSfxMuted() || settings.soundEffectsMuted;
     const sfxVol = sfxMuted ? 0 : Math.max(0, Math.min(100, getSfxVolume() || settings.soundEffectsVolume || 75)) / 100;
-    this.musicBus.gain.setTargetAtTime(musicVol * 0.28, this.ctx.currentTime, 0.02);
+    if (!this.switching) this.musicBus.gain.setTargetAtTime(this.musicTargetGain(), this.ctx.currentTime, 0.02);
     this.sfxBus.gain.setTargetAtTime(sfxVol * 0.36, this.ctx.currentTime, 0.01);
   }
 
+  private restartExclusive(mode: DungeonMusicMode) {
+    const ctx = this.ensure();
+    if (!ctx || !this.musicBus) return;
+    this.mode = mode;
+    this.switching = true;
+    if (this.timer != null) window.clearTimeout(this.timer);
+    this.timer = null;
+    this.musicBus.gain.cancelScheduledValues(ctx.currentTime);
+    this.musicBus.gain.setValueAtTime(this.musicBus.gain.value, ctx.currentTime);
+    this.musicBus.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+    window.setTimeout(() => {
+      if (!this.ctx || !this.musicBus || !this.running) return;
+      this.step = 0;
+      this.switching = false;
+      this.musicBus.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.musicBus.gain.setValueAtTime(0.0001, this.ctx.currentTime);
+      this.musicBus.gain.linearRampToValueAtTime(this.musicTargetGain(), this.ctx.currentTime + 0.16);
+      this.schedule();
+    }, 95);
+  }
+
+  private duckMusic(duration = 0.5, depth = 0.06) {
+    if (!this.ctx || !this.musicBus || this.switching) return;
+    if (this.restoreTimer != null) window.clearTimeout(this.restoreTimer);
+    const now = this.ctx.currentTime;
+    const target = this.musicTargetGain();
+    this.musicBus.gain.cancelScheduledValues(now);
+    this.musicBus.gain.setValueAtTime(this.musicBus.gain.value, now);
+    this.musicBus.gain.linearRampToValueAtTime(target * depth, now + 0.035);
+    this.restoreTimer = window.setTimeout(() => {
+      if (!this.ctx || !this.musicBus || this.switching) return;
+      this.musicBus.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.musicBus.gain.setValueAtTime(this.musicBus.gain.value, this.ctx.currentTime);
+      this.musicBus.gain.linearRampToValueAtTime(this.musicTargetGain(), this.ctx.currentTime + 0.18);
+      this.restoreTimer = null;
+    }, duration * 1000);
+  }
+
   async unlock(mode: DungeonMusicMode = this.mode): Promise<boolean> {
+    const modeChanged = mode !== this.mode;
     this.mode = mode;
     const ctx = this.ensure();
     if (!ctx || !this.musicBus) return false;
@@ -118,6 +164,8 @@ class DungeonAudio {
       this.running = true;
       this.step = 0;
       this.schedule();
+    } else if (modeChanged) {
+      this.restartExclusive(mode);
     }
     this.tone(880, ctx.currentTime + 0.01, 0.045, 'triangle', 0.035, this.musicBus, 2400);
     return ctx.state === 'running';
@@ -137,6 +185,10 @@ class DungeonAudio {
   }
 
   setMode(mode: DungeonMusicMode) {
+    if (mode !== this.mode && this.running) {
+      this.restartExclusive(mode);
+      return;
+    }
     this.mode = mode;
     this.applySettings();
   }
@@ -144,7 +196,10 @@ class DungeonAudio {
   stop() {
     this.running = false;
     if (this.timer != null) window.clearTimeout(this.timer);
+    if (this.restoreTimer != null) window.clearTimeout(this.restoreTimer);
     this.timer = null;
+    this.restoreTimer = null;
+    this.switching = false;
   }
 
   private schedule = () => {
@@ -232,6 +287,7 @@ class DungeonAudio {
     const settings = loadSettings();
     if (getSfxMuted() || settings.soundEffectsMuted || (getSfxVolume() || settings.soundEffectsVolume || 75) <= 0) return;
     const now = ctx.currentTime;
+    this.duckMusic(kind === 'boss' || kind === 'death' || kind === 'level' ? 0.85 : 0.42, kind === 'boss' || kind === 'death' ? 0.015 : 0.05);
     const map: Record<DungeonSfx, [number, number, OscillatorType]> = {
       hit: [110, 55, 'square'],
       crit: [880, 1480, 'sawtooth'],
