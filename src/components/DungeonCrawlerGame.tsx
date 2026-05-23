@@ -6,10 +6,12 @@ import { DoctrineQuestion, doctrineForSeed } from '../dungeonDoctrine';
 import { getDungeonAudio } from '../dungeonAudio';
 import type { DungeonMusicMode } from '../dungeonAudio';
 import { getVaporSynth } from '../vaporSynth';
-import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState } from '../types';
+import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState, EquipmentSlot } from '../types';
 import type { SkillName } from '../types';
 import { loadDungeonState, resetDungeonState, saveDungeonState } from '../storage';
-import { SKILL_ORDER, addSkillXp, applyIdleMinutes, beginIdleProgress, checkAchievements, combatBonuses, skillTotal, xpForLevel } from '../game/swoleGame';
+import { EQUIPMENT_CATALOG, PRESTIGE_PERKS, SKILL_ORDER, addSkillXp, applyIdleMinutes, beginIdleProgress, buyPrestigePerk, canUseEquipment, checkAchievements, craftEquipment, equipItem, performPrestige, prestigePointsAvailable, skillTotal, totalCombatBonuses, upgradeEquipment, xpForLevel } from '../game/swoleGame';
+
+const EQUIPMENT_SLOT_ORDER: EquipmentSlot[] = ['head', 'chest', 'legs', 'weapon', 'accessory1', 'accessory2'];
 
 type Props = {
   onClose: () => void;
@@ -139,11 +141,11 @@ function MiniAsset({ kind, id, label }: { kind: 'monsters' | 'bosses' | 'relics'
 export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const [state, setState] = useState<DungeonState>(() => loadDungeonState());
   const [pulse, setPulse] = useState(false);
-  const [panel, setPanel] = useState<'town' | 'run' | 'skills' | 'idle' | 'relics' | 'achievements'>('town');
+  const [panel, setPanel] = useState<'town' | 'run' | 'skills' | 'idle' | 'equipment' | 'craft' | 'prestige' | 'relics' | 'achievements'>('town');
   const [fx, setFx] = useState<keyof typeof DUNGEON_FX | null>(null);
   const [doctrine, setDoctrine] = useState<DoctrineQuestion | null>(null);
   const [doctrineSolved, setDoctrineSolved] = useState(false);
-  const bonuses = useMemo(() => combatBonuses(state.skills), [state.skills]);
+  const bonuses = useMemo(() => totalCombatBonuses(state), [state]);
 
   useEffect(() => {
     saveDungeonState(state);
@@ -246,7 +248,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
       const enemyRemaining = Number(prev.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? enemyMax);
       const didCrit = Math.random() * 100 < prev.player.crit;
       const bossGuard = isBoss ? 0.62 : 1;
-      const skillB = combatBonuses(prev.skills);
+      const skillB = totalCombatBonuses(prev);
       const playerDamage = Math.max(1, Math.floor((prev.player.attack + skillB.attack + Math.floor(prev.player.level / 2) - currentEnemy.defense + (didCrit ? prev.player.attack + Math.floor(skillB.crit / 2) : 0)) * bossGuard));
       const enemyNext = enemyRemaining - playerDamage;
       let next = appendLog(prev, `${didCrit ? 'CRIT! ' : ''}${currentEnemy.name} TAKES ${playerDamage}`);
@@ -452,6 +454,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         resource.id === 'chalk' ? { ...resource, amount: resource.amount + lootRolls * 2 } :
         resource.id === 'plates' ? { ...resource, amount: resource.amount + Math.floor(lootRolls / 2) } :
         resource.id === 'protein' ? { ...resource, amount: resource.amount + lootRolls } :
+        resource.id === 'essence' ? { ...resource, amount: resource.amount + Math.floor(lootRolls / 3) } :
         resource
       ));
       const { player, leveled } = grantXp({
@@ -511,6 +514,53 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     });
   };
 
+  const craftGear = (id: string) => {
+    setState(prev => {
+      const next = craftEquipment(prev, id);
+      if (next === prev) onShowToast('Need more coins/resources or already crafted');
+      else getDungeonAudio().sfx('loot');
+      return next;
+    });
+  };
+
+  const equipGear = (id: string) => {
+    setState(prev => {
+      const item = EQUIPMENT_CATALOG.find(i => i.id === id);
+      const next = equipItem(prev, id);
+      if (next === prev) onShowToast(item ? 'Skill requirement not met yet' : 'Cannot equip');
+      else getDungeonAudio().sfx('block');
+      return next;
+    });
+  };
+
+  const upgradeGear = (id: string) => {
+    setState(prev => {
+      const next = upgradeEquipment(prev, id);
+      if (next === prev) onShowToast('Need cursed plates/coins or max level');
+      else getDungeonAudio().sfx('level');
+      return next;
+    });
+  };
+
+  const prestigeNow = () => {
+    if (!window.confirm('Prestige resets Swolecrypt skills, current run, relics, and gear for permanent Swole Points. Workout data is untouched. Ascend?')) return;
+    setState(prev => {
+      const next = performPrestige(prev);
+      if (next === prev) onShowToast('Not enough total levels/depth/bosses for prestige yet');
+      else getDungeonAudio().sfx('level');
+      return next;
+    });
+  };
+
+  const buyPerk = (id: string) => {
+    setState(prev => {
+      const next = buyPrestigePerk(prev, id);
+      if (next === prev) onShowToast('Need Swole Points or perk is maxed');
+      else getDungeonAudio().sfx('shrine');
+      return next;
+    });
+  };
+
   const hardReset = () => {
     if (!window.confirm('Erase Swolecrypt progress? Workout data is untouched.')) return;
     const audio = getDungeonAudio();
@@ -549,7 +599,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         </div>
       </div>
 
-      <div className="relative z-10 flex-1 overflow-y-auto px-3 py-4">
+      <div className="scrollbar-hide relative z-10 flex-1 overflow-y-auto px-3 py-4">
         {state.pendingWorkoutBonus && (
           <button onClick={claimBonus} className="mb-3 w-full rounded-sm border border-vapor-green bg-vapor-green/10 p-3 text-left text-vapor-green shadow-neon-green">
             CLAIM WORKOUT OFFERING: +{state.pendingWorkoutBonus.coins} COINS / +{state.pendingWorkoutBonus.xp} XP / +{state.pendingWorkoutBonus.buffAttack} ATK
@@ -630,7 +680,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-1">
-          {(['town', 'run', 'skills', 'idle', 'relics', 'achievements'] as const).map(p => (
+          {(['town', 'run', 'skills', 'idle', 'equipment', 'craft', 'prestige', 'relics', 'achievements'] as const).map(p => (
             <button key={p} onClick={() => setPanel(p)} className={`rounded-sm border px-2 py-2 text-xs ${panel === p ? 'border-vapor-cyan text-vapor-cyan bg-vapor-cyan/10' : 'border-vapor-pink/50 text-vapor-muted'}`}>{p}</button>
           ))}
         </div>
@@ -648,7 +698,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
                   const cost = Math.floor(b.cost.coins * Math.pow(1.85, b.level - 1));
                   return (
                     <button key={b.id} onClick={() => upgradeBuilding(b.id)} className="dungeon-loot text-left">
-                      <span className="text-2xl">{b.id === 'training_hall' ? '🏛️' : b.id === 'blacksmith' ? '⚒️' : b.id === 'library' ? '📚' : '🐀'}</span>
+                      <span className="text-2xl">{b.id === 'training_hall' ? '🏛️' : b.id === 'blacksmith' ? '⚒️' : b.id === 'library' ? '📚' : b.id === 'workout_shrine' ? '🛐' : b.id === 'trophy_room' ? '🏆' : '🐀'}</span>
                       <span><b>{b.name} LVL {b.level}</b> // {cost} COINS<br/><small>{b.effect}. {b.description}</small></span>
                     </button>
                   );
@@ -701,6 +751,81 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
               <button onClick={() => runIdleDelve(3)} className="btn-primary w-full py-3">Simulate 3m Rest Delve</button>
               <div className="space-y-1 text-vapor-muted">
                 {(state.idleProgress?.log ?? ['NO IDLE DELVES YET']).map((l, i) => <p key={i}>▸ {l}</p>)}
+              </div>
+            </div>
+          )}
+          {panel === 'equipment' && (
+            <div className="space-y-3 text-xs">
+              <div className="rounded border border-vapor-cyan/40 bg-vapor-cyan/5 p-3">
+                <p className="font-black text-vapor-pink">EQUIPMENT // DRIP LOADOUT</p>
+                <p className="text-vapor-muted">Gear adds real combat stats. Craft it in the blacksmith, equip it here, upgrade it with cursed plates.</p>
+              </div>
+              <div className="grid gap-2">
+                {EQUIPMENT_SLOT_ORDER.map(slot => {
+                  const id = state.equipment[slot];
+                  const item = EQUIPMENT_CATALOG.find(i => i.id === id);
+                  return (
+                    <div key={slot} className="dungeon-loot">
+                      <span className="text-vapor-yellow">{slot}</span>
+                      {item ? <><MiniAsset kind="relics" id={item.sprite} label={item.name} /><span><b>{item.name} +{state.equipmentLevels[item.id] ?? 1}</b><br/><small>ATK {item.attack ?? 0} / DEF {item.defense ?? 0} / HP {item.maxHp ?? 0} / CRIT {item.crit ?? 0}</small></span></> : <span className="text-vapor-muted">EMPTY SLOT // spiritually drafty</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid gap-2">
+                {state.equipmentInventoryIds.length === 0 ? <p className="text-vapor-muted">No crafted gear yet. Go to CRAFT.</p> : state.equipmentInventoryIds.map(id => {
+                  const item = EQUIPMENT_CATALOG.find(i => i.id === id);
+                  if (!item) return null;
+                  return (
+                    <div key={id} className="dungeon-loot">
+                      <MiniAsset kind="relics" id={item.sprite} label={item.name} />
+                      <span className="flex-1"><b>{item.name} +{state.equipmentLevels[id] ?? 1}</b><br/><small>{item.description}</small></span>
+                      <button onClick={() => equipGear(id)} className="btn-secondary px-2 py-1 text-[10px]">Equip</button>
+                      <button onClick={() => upgradeGear(id)} className="btn-secondary px-2 py-1 text-[10px]">Upgrade</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {panel === 'craft' && (
+            <div className="space-y-3 text-xs">
+              <div className="rounded border border-vapor-pink/50 bg-vapor-pink/10 p-3">
+                <p className="font-black text-vapor-pink">BLACKSMITH // CRAFTING</p>
+                <p className="text-vapor-muted">Costs scale by rarity: coins + cursed plates + neon chalk. Higher skill total unlocks meaner relic-gear.</p>
+              </div>
+              <div className="grid gap-2">
+                {EQUIPMENT_CATALOG.map(item => {
+                  const owned = state.equipmentInventoryIds.includes(item.id);
+                  const usable = canUseEquipment(state, item);
+                  return (
+                    <button key={item.id} onClick={() => craftGear(item.id)} className={`dungeon-loot text-left ${owned ? 'opacity-60' : ''}`}>
+                      <MiniAsset kind="relics" id={item.sprite} label={item.name} />
+                      <span><b>{owned ? 'OWNED // ' : ''}{item.name}</b> <small>// {item.rarity} // {item.slot}</small><br/><small>{item.description} {usable ? '' : ` Requires total ${item.requiredLevel}`}</small></span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {panel === 'prestige' && (
+            <div className="space-y-3 text-xs">
+              <div className="rounded border border-vapor-yellow bg-vapor-yellow/10 p-3">
+                <p className="font-black text-vapor-yellow">PRESTIGE // ASCENSION RACK</p>
+                <p className="text-vapor-muted">Available points now: {prestigePointsAvailable(state)}. Prestige resets dungeon skills/gear/relics, keeps achievements, and grants permanent Swole Points.</p>
+                <p className="mt-1 text-vapor-cyan">Prestiges {state.prestige.totalPrestiges} // Swole Points {state.prestige.swolePoints}</p>
+              </div>
+              <button onClick={prestigeNow} className="btn-primary w-full py-3">Ascend For {prestigePointsAvailable(state)} Swole Points</button>
+              <div className="grid gap-2">
+                {PRESTIGE_PERKS.map(perk => {
+                  const rank = state.prestige.perks[perk.id] ?? 0;
+                  return (
+                    <button key={perk.id} onClick={() => buyPerk(perk.id)} className="dungeon-loot text-left">
+                      <span className="text-2xl">🔮</span>
+                      <span><b>{perk.name} R{rank}/{perk.max}</b> // {perk.cost} SP<br/><small>{perk.description}</small></span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

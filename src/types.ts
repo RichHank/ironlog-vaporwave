@@ -167,6 +167,23 @@ export interface GameSettings {
 
 export type EquipmentSlot = 'head' | 'chest' | 'legs' | 'weapon' | 'accessory1' | 'accessory2';
 
+export interface EquipmentItem {
+  id: string;
+  name: string;
+  slot: EquipmentSlot;
+  rarity: 'common' | 'rare' | 'epic' | 'mythic';
+  requiredLevel: number;
+  requiredSkills?: Partial<Record<SkillName, number>>;
+  attack?: number;
+  defense?: number;
+  maxHp?: number;
+  crit?: number;
+  luck?: number;
+  sprite: string;
+  description: string;
+  setId?: string;
+}
+
 export interface GameResource {
   id: string;
   name: string;
@@ -188,6 +205,13 @@ export interface TownState {
   buildings: Building[];
   resources: GameResource[];
   upgrades: string[];
+}
+
+export interface PrestigeState {
+  totalPrestiges: number;
+  swolePoints: number;
+  lifetimeSwolePoints: number;
+  perks: Record<string, number>;
 }
 
 export interface IdleProgress {
@@ -216,8 +240,11 @@ export interface DungeonState {
   skills: Record<SkillName, Skill>;
   gameSettings: GameSettings;
   equipment: Partial<Record<EquipmentSlot, string>>;
+  equipmentInventoryIds: string[];
+  equipmentLevels: Record<string, number>;
   town: TownState;
   achievements: Achievement[];
+  prestige: PrestigeState;
   idleProgress?: IdleProgress | null;
   relicIds: string[];
   discoveredMonsterIds: string[];

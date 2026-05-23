@@ -4,7 +4,7 @@ import {
 } from './types';
 import { est1RM } from './utils';
 import { idbSet, idbRemove, idbGetJSON } from './idb-storage';
-import { addSkillXp, checkAchievements, defaultAchievements, defaultGameSettings, defaultResources, defaultSkills, defaultTownBuildings, workoutSkillAwards } from './game/swoleGame';
+import { addSkillXp, checkAchievements, defaultAchievements, defaultGameSettings, defaultPrestige, defaultResources, defaultSkills, defaultTownBuildings, workoutSkillAwards } from './game/swoleGame';
 
 export function generateId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -262,8 +262,11 @@ export function defaultDungeonState(): DungeonState {
       skills: defaultSkills(),
       gameSettings: defaultGameSettings(),
       equipment: {},
+      equipmentInventoryIds: [],
+      equipmentLevels: {},
       town: { buildings: defaultTownBuildings(), resources: defaultResources(), upgrades: [] },
       achievements: defaultAchievements(),
+      prestige: defaultPrestige(),
       idleProgress: null,
       run: {
       active: false,
@@ -284,6 +287,13 @@ export function defaultDungeonState(): DungeonState {
   };
 }
 
+
+function mergeAchievements(saved: DungeonState['achievements'] | undefined, fallback: DungeonState['achievements']): DungeonState['achievements'] {
+  if (!saved) return fallback;
+  const byId = new Map(saved.map(a => [a.id, a]));
+  return fallback.map(a => ({ ...a, ...byId.get(a.id), reward: a.reward }));
+}
+
 export function loadDungeonState(): DungeonState {
   const fallback = defaultDungeonState();
   const saved = readJSON<Partial<DungeonState> | null>(DUNGEON_KEY, null);
@@ -295,6 +305,8 @@ export function loadDungeonState(): DungeonState {
       skills: { ...fallback.skills, ...saved.skills },
       gameSettings: { ...fallback.gameSettings, ...saved.gameSettings },
       equipment: { ...fallback.equipment, ...saved.equipment },
+      equipmentInventoryIds: saved.equipmentInventoryIds ?? [],
+      equipmentLevels: { ...fallback.equipmentLevels, ...saved.equipmentLevels },
       town: {
         ...fallback.town,
         ...saved.town,
@@ -302,7 +314,8 @@ export function loadDungeonState(): DungeonState {
         resources: saved.town?.resources ?? fallback.town.resources,
         upgrades: saved.town?.upgrades ?? [],
       },
-      achievements: saved.achievements ?? fallback.achievements,
+      achievements: mergeAchievements(saved.achievements, fallback.achievements),
+      prestige: { ...fallback.prestige, ...saved.prestige, perks: { ...fallback.prestige.perks, ...saved.prestige?.perks } },
       idleProgress: saved.idleProgress ?? null,
       run: { ...fallback.run, ...saved.run },
     relicIds: saved.relicIds ?? [],
