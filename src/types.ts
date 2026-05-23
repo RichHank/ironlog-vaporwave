@@ -250,6 +250,7 @@ export interface DungeonState {
   discoveredMonsterIds: string[];
   discoveredRelicIds: string[];
   unlockedTitles: string[];
+  recentDoctrineIds?: string[];
   pendingWorkoutBonus?: DungeonWorkoutBonus;
   totalRuns: number;
   bossesDefeated: number;

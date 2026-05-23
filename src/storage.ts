@@ -279,6 +279,7 @@ export function defaultDungeonState(): DungeonState {
     discoveredMonsterIds: [],
     discoveredRelicIds: [],
     unlockedTitles: ['Squire of Suspicious Pump'],
+    recentDoctrineIds: [],
     totalRuns: 0,
     bossesDefeated: 0,
     deepestRoom: 0,
@@ -322,6 +323,7 @@ export function loadDungeonState(): DungeonState {
     discoveredMonsterIds: saved.discoveredMonsterIds ?? [],
     discoveredRelicIds: saved.discoveredRelicIds ?? [],
     unlockedTitles: saved.unlockedTitles ?? fallback.unlockedTitles,
+    recentDoctrineIds: saved.recentDoctrineIds ?? [],
     updatedAt: saved.updatedAt ?? Date.now(),
   };
 }

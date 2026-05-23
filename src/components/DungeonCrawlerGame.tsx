@@ -201,7 +201,14 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
 
   useEffect(() => {
     if (state.run.active && state.run.roomType === 'boss' && currentEnemy) {
-      setDoctrine(doctrineForSeed(state.run.room * 101 + currentEnemy.name.length));
+      const question = doctrineForSeed(
+        state.run.room * 101 + currentEnemy.name.length + state.totalRuns * 37 + (state.recentDoctrineIds?.length ?? 0) * 13,
+        state.recentDoctrineIds ?? []
+      );
+      setDoctrine(question);
+      setState(prev => prev.recentDoctrineIds?.[0] === question.id
+        ? prev
+        : { ...prev, recentDoctrineIds: [question.id, ...(prev.recentDoctrineIds ?? []).filter(id => id !== question.id)].slice(0, 54) });
       setDoctrineSolved(false);
     } else {
       setDoctrine(null);
@@ -340,7 +347,9 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     });
     setDoctrineSolved(false);
     if (state.run.roomType === 'boss' && currentEnemy) {
-      setDoctrine(doctrineForSeed(state.run.room * 101 + enemyHp + currentEnemy.attack));
+      const question = doctrineForSeed(state.run.room * 101 + enemyHp + currentEnemy.attack + Date.now(), state.recentDoctrineIds ?? []);
+      setDoctrine(question);
+      setState(prev => ({ ...prev, recentDoctrineIds: [question.id, ...(prev.recentDoctrineIds ?? []).filter(id => id !== question.id)].slice(0, 54) }));
     }
   };
 
