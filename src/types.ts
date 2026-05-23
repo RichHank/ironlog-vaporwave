@@ -84,4 +84,149 @@ export interface AppSettings {
   soundEffectsMuted: boolean;
   musicVolume: number;          // 0-100, default 30
   fontScale: number;            // percentage: 87.5 | 100 | 112.5 | 125, default 100
+  gymDungeonEnabled: boolean;    // hidden Swolecrypt roguelite
+}
+
+export type DungeonRoomType = 'fight' | 'loot' | 'shrine' | 'trap' | 'merchant' | 'rest' | 'glitch' | 'boss';
+
+export interface DungeonEnemy {
+  id: string;
+  name: string;
+  hp: number;
+  attack: number;
+  defense: number;
+  xp: number;
+  coins: number;
+  sprite: string;
+  palette: string;
+  taunt: string;
+}
+
+export interface DungeonRelic {
+  id: string;
+  name: string;
+  kind: 'weapon' | 'armor' | 'charm' | 'curse' | 'snack' | 'glitch';
+  description: string;
+  attack?: number;
+  defense?: number;
+  maxHp?: number;
+  crit?: number;
+  coins?: number;
+  heal?: number;
+  sprite: string;
+}
+
+export interface DungeonPlayer {
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  level: number;
+  xp: number;
+  coins: number;
+  crit: number;
+}
+
+export interface DungeonRun {
+  active: boolean;
+  room: number;
+  roomType: DungeonRoomType;
+  enemyId?: string;
+  bossId?: string;
+  offeredRelicIds: string[];
+  log: string[];
+}
+
+export interface DungeonWorkoutBonus {
+  coins: number;
+  xp: number;
+  buffAttack: number;
+  label: string;
+  skillXp?: Partial<Record<SkillName, number>>;
+  lootRolls?: number;
+}
+
+export type SkillName = 'strength' | 'endurance' | 'dexterity' | 'nutrition' | 'knowledge' | 'luck';
+
+export interface Skill {
+  name: SkillName;
+  level: number;
+  xp: number;
+  displayName: string;
+  description: string;
+  icon: string;
+}
+
+export interface GameSettings {
+  idleModeEnabled: boolean;
+  idleModeIntensity: 'relaxed' | 'balanced' | 'intense';
+  autoClaimWorkoutBonus: boolean;
+  showDungeonDuringRest: boolean;
+  idleFocus: SkillName;
+}
+
+export type EquipmentSlot = 'head' | 'chest' | 'legs' | 'weapon' | 'accessory1' | 'accessory2';
+
+export interface GameResource {
+  id: string;
+  name: string;
+  amount: number;
+  icon: string;
+  description: string;
+}
+
+export interface Building {
+  id: string;
+  name: string;
+  level: number;
+  description: string;
+  effect: string;
+  cost: { coins: number; skills?: Partial<Record<SkillName, number>> };
+}
+
+export interface TownState {
+  buildings: Building[];
+  resources: GameResource[];
+  upgrades: string[];
+}
+
+export interface IdleProgress {
+  startTime: number;
+  lastTickAt: number;
+  roomsCleared: number;
+  coinsEarned: number;
+  xpEarned: Partial<Record<SkillName, number>>;
+  roomsPerMinute: number;
+  riskLevel: number;
+  log: string[];
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  unlocked: boolean;
+  unlockedAt?: number;
+  reward?: { coins?: number; xp?: Partial<Record<SkillName, number>> };
+}
+
+export interface DungeonState {
+  player: DungeonPlayer;
+  run: DungeonRun;
+  skills: Record<SkillName, Skill>;
+  gameSettings: GameSettings;
+  equipment: Partial<Record<EquipmentSlot, string>>;
+  town: TownState;
+  achievements: Achievement[];
+  idleProgress?: IdleProgress | null;
+  relicIds: string[];
+  discoveredMonsterIds: string[];
+  discoveredRelicIds: string[];
+  unlockedTitles: string[];
+  pendingWorkoutBonus?: DungeonWorkoutBonus;
+  totalRuns: number;
+  bossesDefeated: number;
+  deepestRoom: number;
+  createdAt: number;
+  updatedAt: number;
 }

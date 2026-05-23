@@ -7,6 +7,7 @@ import PlateCalculator from './PlateCalculator';
 import StravaSection from './StravaSection';
 import { getVaporSynth } from '../vaporSynth';
 import { FONT_PRESETS, applyFontScale } from '../fontScale';
+import DungeonCrawlerGame from './DungeonCrawlerGame';
 
 type Props = {
   onShowToast: (msg: string) => void;
@@ -22,6 +23,7 @@ export default function SettingsView({ onShowToast }: Props) {
   const [sfxVolume, setSfxVolState] = useState(() => getSfxVolume());
   const [sfxMuted, setSfxMutedState] = useState(() => getSfxMuted());
   const [fontScale, setFontScaleState] = useState(() => loadSettings().fontScale ?? 100);
+  const [showDungeon, setShowDungeon] = useState(false);
 
   const toggleMusic = () => {
     const synth = getVaporSynth();
@@ -135,6 +137,31 @@ export default function SettingsView({ onShowToast }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="card p-4 relative overflow-hidden border-vapor-pink/40">
+            <div className="absolute inset-0 pointer-events-none opacity-30 bg-[radial-gradient(circle_at_top_right,rgba(255,42,163,0.28),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(0,245,255,0.22),transparent_40%)]" />
+            <div className="relative flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-vapor-pink tracking-wider">SWOLECRYPT Dungeon Mode</p>
+                <p className="text-[11px] text-vapor-muted mt-0.5">Hidden idle RPG: skills, town upgrades, workout offerings, dungeon synth chaos.</p>
+              </div>
+              <button
+                onClick={() => updateSetting('gymDungeonEnabled', !settings.gymDungeonEnabled)}
+                className={`flex-shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold ${settings.gymDungeonEnabled ? 'bg-vapor-green text-black shadow-[0_0_14px_rgba(5,255,161,0.35)]' : 'bg-vapor-navy text-vapor-muted'}`}
+              >
+                {settings.gymDungeonEnabled ? 'Enabled' : 'Off'}
+              </button>
+            </div>
+            {settings.gymDungeonEnabled && (
+              <button
+                onClick={() => setShowDungeon(true)}
+                className="relative mt-4 w-full rounded-xl border border-vapor-cyan/50 bg-vapor-navy px-4 py-3 text-left font-black text-vapor-cyan shadow-[0_0_18px_rgba(0,245,255,0.18)]"
+              >
+                ENTER SWOLECRYPT // NEON IDLE RPG
+                <span className="block text-[11px] font-semibold text-vapor-muted mt-1">Open the town lobby, train skills, and let rest timers crawl the crypt.</span>
+              </button>
+            )}
           </div>
 
           <div className="card p-4">
@@ -275,6 +302,7 @@ export default function SettingsView({ onShowToast }: Props) {
       )}
 
       <div className="h-8" />
+      {showDungeon && <DungeonCrawlerGame onClose={() => setShowDungeon(false)} onShowToast={onShowToast} />}
     </div>
   );
 }

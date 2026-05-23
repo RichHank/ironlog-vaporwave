@@ -1,9 +1,10 @@
 import {
   WorkoutSession, ExerciseLog, WorkoutSet, Routine,
-  PersonalRecord, BodyMeasurement, AppSettings,
+  PersonalRecord, BodyMeasurement, AppSettings, DungeonState, DungeonWorkoutBonus, SkillName,
 } from './types';
 import { est1RM } from './utils';
 import { idbSet, idbRemove, idbGetJSON } from './idb-storage';
+import { addSkillXp, checkAchievements, defaultAchievements, defaultGameSettings, defaultResources, defaultSkills, defaultTownBuildings, workoutSkillAwards } from './game/swoleGame';
 
 export function generateId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -19,6 +20,7 @@ const ROUTINES_KEY = 'il-routines';
 const PRS_KEY = 'il-prs';
 const MEASUREMENTS_KEY = 'il-measurements';
 const SETTINGS_KEY = 'il-settings';
+const DUNGEON_KEY = 'il-dungeon';
 
 // ── Generic helpers ──
 function readJSON<T>(key: string, fallback: T): T {
@@ -236,11 +238,130 @@ export function addMeasurement(m: BodyMeasurement): BodyMeasurement[] {
 
 // ── Settings ──
 export function loadSettings(): AppSettings {
-  return readJSON<AppSettings>(SETTINGS_KEY, { weightUnit: 'lb', restTimerDuration: 90, soundEffectsVolume: 75, soundEffectsMuted: false, musicVolume: 30, fontScale: 100 });
+  return {
+    weightUnit: 'lb',
+    restTimerDuration: 90,
+    soundEffectsVolume: 75,
+    soundEffectsMuted: false,
+    musicVolume: 30,
+    fontScale: 100,
+    gymDungeonEnabled: false,
+    ...readJSON<Partial<AppSettings>>(SETTINGS_KEY, {}),
+  };
 }
 
 export function saveSettings(s: AppSettings): void {
   writeJSON(SETTINGS_KEY, s);
+}
+
+// ── Swolecrypt Dungeon ──
+export function defaultDungeonState(): DungeonState {
+  const now = Date.now();
+  return {
+      player: { hp: 42, maxHp: 42, attack: 7, defense: 2, level: 1, xp: 0, coins: 15, crit: 6 },
+      skills: defaultSkills(),
+      gameSettings: defaultGameSettings(),
+      equipment: {},
+      town: { buildings: defaultTownBuildings(), resources: defaultResources(), upgrades: [] },
+      achievements: defaultAchievements(),
+      idleProgress: null,
+      run: {
+      active: false,
+      room: 0,
+      roomType: 'fight',
+      offeredRelicIds: [],
+      log: ['SWOLECRYPT BOOT SEQUENCE: HELL YEAH'],
+    },
+    relicIds: [],
+    discoveredMonsterIds: [],
+    discoveredRelicIds: [],
+    unlockedTitles: ['Squire of Suspicious Pump'],
+    totalRuns: 0,
+    bossesDefeated: 0,
+    deepestRoom: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function loadDungeonState(): DungeonState {
+  const fallback = defaultDungeonState();
+  const saved = readJSON<Partial<DungeonState> | null>(DUNGEON_KEY, null);
+  if (!saved) return fallback;
+    return {
+      ...fallback,
+      ...saved,
+      player: { ...fallback.player, ...saved.player },
+      skills: { ...fallback.skills, ...saved.skills },
+      gameSettings: { ...fallback.gameSettings, ...saved.gameSettings },
+      equipment: { ...fallback.equipment, ...saved.equipment },
+      town: {
+        ...fallback.town,
+        ...saved.town,
+        buildings: saved.town?.buildings ?? fallback.town.buildings,
+        resources: saved.town?.resources ?? fallback.town.resources,
+        upgrades: saved.town?.upgrades ?? [],
+      },
+      achievements: saved.achievements ?? fallback.achievements,
+      idleProgress: saved.idleProgress ?? null,
+      run: { ...fallback.run, ...saved.run },
+    relicIds: saved.relicIds ?? [],
+    discoveredMonsterIds: saved.discoveredMonsterIds ?? [],
+    discoveredRelicIds: saved.discoveredRelicIds ?? [],
+    unlockedTitles: saved.unlockedTitles ?? fallback.unlockedTitles,
+    updatedAt: saved.updatedAt ?? Date.now(),
+  };
+}
+
+export function saveDungeonState(state: DungeonState): void {
+  writeJSON(DUNGEON_KEY, { ...state, updatedAt: Date.now() });
+}
+
+export function resetDungeonState(): DungeonState {
+  const fresh = defaultDungeonState();
+  saveDungeonState(fresh);
+  return fresh;
+}
+
+export function grantDungeonWorkoutBonus(session: WorkoutSession): DungeonWorkoutBonus | null {
+  if (!loadSettings().gymDungeonEnabled) return null;
+  const sets = session.exercises.reduce((sum, ex) => sum + ex.sets.length, 0);
+  const volume = session.exercises.reduce((sum, ex) =>
+    sum + ex.sets.reduce((inner, set) => inner + (set.weight ?? 0) * (set.reps ?? 0), 0), 0
+  );
+  const bonus: DungeonWorkoutBonus = {
+    coins: Math.max(15, Math.min(160, sets * 5 + Math.floor(volume / 650))),
+    xp: Math.max(8, Math.min(75, sets * 4)),
+    buffAttack: sets >= 8 ? 2 : 1,
+    skillXp: workoutSkillAwards(session),
+    lootRolls: Math.floor(sets / 5) + (volume > 5000 ? 2 : 0),
+    label: `${sets} SET OFFERING`,
+  };
+  const state = loadDungeonState();
+  const skillResult = state.gameSettings.autoClaimWorkoutBonus ? addSkillXp(state.skills, bonus.skillXp ?? {}) : null;
+  if (skillResult) {
+    state.skills = skillResult.skills;
+    state.player.coins += bonus.coins;
+    state.player.attack += bonus.buffAttack;
+    state.player.xp += bonus.xp;
+  }
+  const mergedSkillXp = (a: DungeonWorkoutBonus['skillXp'] = {}, b: DungeonWorkoutBonus['skillXp'] = {}) => {
+    const keys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)])) as SkillName[];
+    return Object.fromEntries(keys.map(k => [k, (a[k] ?? 0) + (b[k] ?? 0)])) as Partial<Record<SkillName, number>>;
+  };
+  state.pendingWorkoutBonus = state.gameSettings.autoClaimWorkoutBonus ? undefined : state.pendingWorkoutBonus
+    ? {
+          coins: state.pendingWorkoutBonus.coins + bonus.coins,
+          xp: state.pendingWorkoutBonus.xp + bonus.xp,
+          buffAttack: Math.max(state.pendingWorkoutBonus.buffAttack, bonus.buffAttack),
+          skillXp: mergedSkillXp(state.pendingWorkoutBonus.skillXp, bonus.skillXp),
+          lootRolls: (state.pendingWorkoutBonus.lootRolls ?? 0) + (bonus.lootRolls ?? 0),
+          label: 'STACKED PUMP OFFERING',
+        }
+      : (state.gameSettings.autoClaimWorkoutBonus ? undefined : bonus);
+  state.run.log = [`WORKOUT BONUS ${state.gameSettings.autoClaimWorkoutBonus ? 'AUTO-CLAIMED' : 'READY'}: +${bonus.coins} COINS / +${bonus.xp} XP`, ...state.run.log].slice(0, 8);
+  saveDungeonState(checkAchievements(state));
+  return bonus;
 }
 
 // ── Export / Import ──
@@ -250,6 +371,7 @@ export function exportAllJSON(): string {
     routines: loadRoutines(),
     prs: loadPRs(),
     measurements: loadMeasurements(),
+    dungeon: loadDungeonState(),
     exportedAt: new Date().toISOString(),
   }, null, 2);
 }
@@ -296,7 +418,7 @@ export function downloadFile(filename: string, content: string, type: string): v
 }
 
 export function clearAllData(): void {
-  [SESSION_KEY, HISTORY_KEY, ROUTINES_KEY, PRS_KEY, MEASUREMENTS_KEY].forEach(removeKey);
+  [SESSION_KEY, HISTORY_KEY, ROUTINES_KEY, PRS_KEY, MEASUREMENTS_KEY, DUNGEON_KEY].forEach(removeKey);
 }
 
 // One-shot hydration from IDB. Returns whatever IDB has for each app key so
@@ -310,14 +432,16 @@ export async function hydrateFromIDB(): Promise<{
   prs: PersonalRecord[];
   measurements: BodyMeasurement[];
   settings: AppSettings;
+  dungeon: DungeonState;
 }> {
-  const [session, history, routines, prs, measurements, settings] = await Promise.all([
+  const [session, history, routines, prs, measurements, settings, dungeon] = await Promise.all([
     idbGetJSON<WorkoutSession | null>(SESSION_KEY, null),
     idbGetJSON<WorkoutSession[]>(HISTORY_KEY, []),
     idbGetJSON<Routine[]>(ROUTINES_KEY, []),
     idbGetJSON<PersonalRecord[]>(PRS_KEY, []),
     idbGetJSON<BodyMeasurement[]>(MEASUREMENTS_KEY, []),
-    idbGetJSON<AppSettings>(SETTINGS_KEY, { weightUnit: 'lb', restTimerDuration: 90, soundEffectsVolume: 75, soundEffectsMuted: false, musicVolume: 30, fontScale: 100 }),
+    idbGetJSON<AppSettings>(SETTINGS_KEY, { weightUnit: 'lb', restTimerDuration: 90, soundEffectsVolume: 75, soundEffectsMuted: false, musicVolume: 30, fontScale: 100, gymDungeonEnabled: false }),
+    idbGetJSON<DungeonState>(DUNGEON_KEY, defaultDungeonState()),
   ]);
-  return { session, history, routines, prs, measurements, settings };
+  return { session, history, routines, prs, measurements, settings, dungeon };
 }
