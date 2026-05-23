@@ -322,32 +322,55 @@ export function beginIdleProgress(state: DungeonState): IdleProgress {
   const intensityMult = intensity === 'relaxed' ? 0.72 : intensity === 'intense' ? 1.35 : 1;
   const roomsPerMinute = Math.max(0.35, (0.75 + skillTotal(state.skills) / 180) * bonuses.idleSpeed * intensityMult);
   const riskLevel = Math.max(0.015, (intensity === 'intense' ? 0.19 : intensity === 'relaxed' ? 0.07 : 0.12) - bonuses.idleRiskReduction);
-  return { startTime: Date.now(), lastTickAt: Date.now(), roomsCleared: 0, coinsEarned: 0, xpEarned: {}, roomsPerMinute, riskLevel, log: ['IDLE DELVE ARMED'] };
+  return { startTime: Date.now(), lastTickAt: Date.now(), roomsCleared: 0, roomCarry: 0, coinsEarned: 0, xpEarned: {}, roomsPerMinute, riskLevel, log: ['IDLE DELVE ARMED'] };
 }
 
 export function applyIdleMinutes(state: DungeonState, minutes: number): DungeonState {
   if (!state.gameSettings.idleModeEnabled || minutes <= 0) return state;
   const progress = state.idleProgress ?? beginIdleProgress(state);
-  const rooms = Math.max(1, Math.floor(progress.roomsPerMinute * minutes));
   const bonuses = totalCombatBonuses(state);
-  const coins = Math.floor(rooms * (5 + state.deepestRoom / 10) * bonuses.coinBoost);
+  const intensity = state.gameSettings.idleModeIntensity;
+  const intensityMult = intensity === 'relaxed' ? 0.72 : intensity === 'intense' ? 1.35 : 1;
+  const roomsPerMinute = Math.max(0.35, (0.75 + skillTotal(state.skills) / 180) * bonuses.idleSpeed * intensityMult);
+  const riskLevel = Math.max(0.015, (intensity === 'intense' ? 0.19 : intensity === 'relaxed' ? 0.07 : 0.12) - bonuses.idleRiskReduction);
+  const rawRooms = (progress.roomCarry ?? 0) + roomsPerMinute * minutes;
+  const rooms = Math.floor(rawRooms);
+  const roomCarry = rawRooms - rooms;
+  if (rooms <= 0) {
+    return {
+      ...state,
+      idleProgress: {
+        ...progress,
+        lastTickAt: Date.now(),
+        roomCarry,
+        roomsPerMinute,
+        riskLevel,
+        log: ['IDLE DELVE CHARGING...', ...progress.log.filter(l => l !== 'IDLE DELVE CHARGING...')].slice(0, 6),
+      },
+    };
+  }
+  const depthAfterIdle = progress.roomsCleared + rooms;
+  const coins = Math.floor(rooms * (5 + Math.max(state.deepestRoom, depthAfterIdle) / 10) * bonuses.coinBoost);
   const focus = state.gameSettings.idleFocus;
   const xp: Partial<Record<SkillName, number>> = {
     [focus]: rooms * 12,
     endurance: rooms * 3,
     luck: Math.max(1, Math.floor(rooms * 1.5)),
   };
-  const died = Math.random() < Math.min(0.65, progress.riskLevel * minutes * 0.22);
+  const died = Math.random() < Math.min(0.65, riskLevel * minutes * 0.22);
   const { skills, leveled } = addSkillXp(state.skills, xp);
   const next: DungeonState = {
     ...state,
     skills,
     player: { ...state.player, coins: state.player.coins + coins, hp: died ? state.player.maxHp : state.player.hp },
     run: died ? { ...state.run, active: false, room: 0, enemyId: undefined, bossId: undefined, log: [`IDLE DELVE WIPED AFTER ${rooms} ROOMS`, ...state.run.log].slice(0, 9) } : state.run,
-    deepestRoom: Math.max(state.deepestRoom, state.run.room + rooms),
+    deepestRoom: Math.max(state.deepestRoom, state.run.room + depthAfterIdle, depthAfterIdle),
     idleProgress: {
       ...progress,
       lastTickAt: Date.now(),
+      roomCarry,
+      roomsPerMinute,
+      riskLevel,
       roomsCleared: progress.roomsCleared + rooms,
       coinsEarned: progress.coinsEarned + coins,
       xpEarned: { ...progress.xpEarned, [focus]: (progress.xpEarned[focus] ?? 0) + (xp[focus] ?? 0) },

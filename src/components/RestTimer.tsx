@@ -33,6 +33,13 @@ export default function RestTimer({ timer, activeExercise }: Props) {
   const [idlePulse, setIdlePulse] = useState('');
 
   useEffect(() => {
+    if (timer.isRunning && !timer.isPaused) {
+      lastIdleTick.current = Date.now();
+      setIdlePulse('arming crypt goblins...');
+    }
+  }, [timer.isRunning, timer.isPaused, timer.duration]);
+
+  useEffect(() => {
     const justExpired = prevSeconds.current > 0 && timer.displaySeconds === 0;
     if (justExpired && !document.hidden) {
       if (window.navigator?.vibrate) window.navigator.vibrate([200, 100, 200, 100, 400]);
@@ -44,19 +51,29 @@ export default function RestTimer({ timer, activeExercise }: Props) {
   }, [timer.displaySeconds]);
 
   useEffect(() => {
-    if (!timer.isRunning || timer.isPaused) return;
-    const settings = loadSettings();
-    if (!settings.gymDungeonEnabled) return;
+    if (!timer.isRunning || timer.isPaused) {
+      lastIdleTick.current = Date.now();
+      return;
+    }
     const tick = window.setInterval(() => {
+      const now = Date.now();
+      const elapsedMs = Math.max(0, now - lastIdleTick.current);
+      lastIdleTick.current = now;
+      const settings = loadSettings();
+      if (!settings.gymDungeonEnabled) return;
       const dungeon = loadDungeonState();
       if (!dungeon.gameSettings.idleModeEnabled || !dungeon.gameSettings.showDungeonDuringRest) return;
-      const now = Date.now();
-      const minutes = Math.max(0.05, (now - lastIdleTick.current) / 60000);
-      lastIdleTick.current = now;
+      const minutes = elapsedMs / 60000;
+      if (minutes <= 0) return;
+      const beforeRooms = dungeon.idleProgress?.roomsCleared ?? 0;
       const next = applyIdleMinutes({ ...dungeon, idleProgress: dungeon.idleProgress ?? beginIdleProgress(dungeon) }, minutes);
       saveDungeonState(next);
-      setIdlePulse(`+${next.idleProgress?.roomsCleared ?? 0} crypt rooms`);
-    }, 15000);
+      window.dispatchEvent(new CustomEvent('ironlog:dungeon-state-updated'));
+      const deltaRooms = Math.max(0, (next.idleProgress?.roomsCleared ?? 0) - beforeRooms);
+      setIdlePulse(deltaRooms > 0
+        ? `+${deltaRooms} rooms // ${next.idleProgress?.roomsCleared ?? 0} total`
+        : `${Math.round((next.idleProgress?.roomCarry ?? 0) * 100)}% to next room`);
+    }, 5000);
     return () => window.clearInterval(tick);
   }, [timer.isRunning, timer.isPaused]);
 

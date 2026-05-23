@@ -146,10 +146,17 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const [doctrine, setDoctrine] = useState<DoctrineQuestion | null>(null);
   const [doctrineSolved, setDoctrineSolved] = useState(false);
   const bonuses = useMemo(() => totalCombatBonuses(state), [state]);
+  const idlePreview = useMemo(() => state.idleProgress ?? beginIdleProgress(state), [state]);
 
   useEffect(() => {
     saveDungeonState(state);
   }, [state]);
+
+  useEffect(() => {
+    const syncExternalDungeonState = () => setState(loadDungeonState());
+    window.addEventListener('ironlog:dungeon-state-updated', syncExternalDungeonState);
+    return () => window.removeEventListener('ironlog:dungeon-state-updated', syncExternalDungeonState);
+  }, []);
 
   useEffect(() => {
     getVaporSynth().setDucked(true);
@@ -752,6 +759,12 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={() => updateGameSetting('idleModeEnabled', !state.gameSettings.idleModeEnabled)} className="btn-secondary py-2">Idle {state.gameSettings.idleModeEnabled ? 'On' : 'Off'}</button>
                 <button onClick={() => updateGameSetting('autoClaimWorkoutBonus', !state.gameSettings.autoClaimWorkoutBonus)} className="btn-secondary py-2">Auto Claim {state.gameSettings.autoClaimWorkoutBonus ? 'On' : 'Off'}</button>
+                <button onClick={() => updateGameSetting('showDungeonDuringRest', !state.gameSettings.showDungeonDuringRest)} className="btn-secondary col-span-2 py-2">Rest Timer Crawl {state.gameSettings.showDungeonDuringRest ? 'On' : 'Off'}</button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded border border-vapor-cyan/40 bg-black/40 p-2"><b className="text-vapor-cyan">{state.idleProgress?.roomsCleared ?? 0}</b><br/><span className="text-vapor-muted">rooms</span></div>
+                <div className="rounded border border-vapor-green/40 bg-black/40 p-2"><b className="text-vapor-green">{state.idleProgress?.coinsEarned ?? 0}</b><br/><span className="text-vapor-muted">coins</span></div>
+                <div className="rounded border border-vapor-pink/40 bg-black/40 p-2"><b className="text-vapor-pink">{idlePreview.roomsPerMinute.toFixed(2)}</b><br/><span className="text-vapor-muted">rpm</span></div>
               </div>
               <p className="text-vapor-muted">Focus skill:</p>
               <div className="grid grid-cols-3 gap-1">

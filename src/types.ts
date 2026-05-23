@@ -218,6 +218,7 @@ export interface IdleProgress {
   startTime: number;
   lastTickAt: number;
   roomsCleared: number;
+  roomCarry?: number;
   coinsEarned: number;
   xpEarned: Partial<Record<SkillName, number>>;
   roomsPerMinute: number;
