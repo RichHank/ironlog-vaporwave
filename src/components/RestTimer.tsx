@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExerciseLog } from '../types';
 import { playClick, playAlarm, playPowerUp } from '../audio';
+import { loadDungeonState, loadSettings, saveDungeonState } from '../storage';
+import { applyIdleMinutes, beginIdleProgress } from '../game/swoleGame';
 
 const PRESETS = [45, 60, 90, 120, 150, 180];
 
@@ -26,7 +28,9 @@ export default function RestTimer({ timer, activeExercise }: Props) {
   // Screen wake-lock is held by App.tsx for the whole active session,
   // so it covers the timer view and the dead time between sets.
   const prevSeconds = useRef(timer.displaySeconds);
+  const lastIdleTick = useRef(Date.now());
   const [glitch, setGlitch] = useState(false);
+  const [idlePulse, setIdlePulse] = useState('');
 
   useEffect(() => {
     const justExpired = prevSeconds.current > 0 && timer.displaySeconds === 0;
@@ -38,6 +42,23 @@ export default function RestTimer({ timer, activeExercise }: Props) {
     }
     prevSeconds.current = timer.displaySeconds;
   }, [timer.displaySeconds]);
+
+  useEffect(() => {
+    if (!timer.isRunning || timer.isPaused) return;
+    const settings = loadSettings();
+    if (!settings.gymDungeonEnabled) return;
+    const tick = window.setInterval(() => {
+      const dungeon = loadDungeonState();
+      if (!dungeon.gameSettings.idleModeEnabled || !dungeon.gameSettings.showDungeonDuringRest) return;
+      const now = Date.now();
+      const minutes = Math.max(0.05, (now - lastIdleTick.current) / 60000);
+      lastIdleTick.current = now;
+      const next = applyIdleMinutes({ ...dungeon, idleProgress: dungeon.idleProgress ?? beginIdleProgress(dungeon) }, minutes);
+      saveDungeonState(next);
+      setIdlePulse(`+${next.idleProgress?.roomsCleared ?? 0} crypt rooms`);
+    }, 15000);
+    return () => window.clearInterval(tick);
+  }, [timer.isRunning, timer.isPaused]);
 
   const progress = timer.isRunning ? (timer.displaySeconds / timer.duration) * 100 : 0;
   const isUrgent = timer.displaySeconds <= 10 && timer.isRunning;
@@ -87,6 +108,11 @@ export default function RestTimer({ timer, activeExercise }: Props) {
               </span>
               <span className="text-[8px] text-[#ff2aa3]/80 tracking-widest uppercase">PWR OK</span>
             </div>
+            {timer.isRunning && idlePulse && (
+              <div className="mt-2 border border-[#00f5ff]/30 bg-[#00f5ff]/10 px-2 py-1 text-[9px] font-bold tracking-[0.18em] text-[#00f5ff]">
+                SWOLECRYPT IDLE // {idlePulse}
+              </div>
+            )}
           </div>
         </div>
 

@@ -7,7 +7,9 @@ import { getDungeonAudio } from '../dungeonAudio';
 import type { DungeonMusicMode } from '../dungeonAudio';
 import { getVaporSynth } from '../vaporSynth';
 import { DungeonEnemy, DungeonRelic, DungeonRoomType, DungeonState } from '../types';
+import type { SkillName } from '../types';
 import { loadDungeonState, resetDungeonState, saveDungeonState } from '../storage';
+import { SKILL_ORDER, addSkillXp, applyIdleMinutes, beginIdleProgress, checkAchievements, combatBonuses, skillTotal, xpForLevel } from '../game/swoleGame';
 
 type Props = {
   onClose: () => void;
@@ -137,10 +139,11 @@ function MiniAsset({ kind, id, label }: { kind: 'monsters' | 'bosses' | 'relics'
 export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
   const [state, setState] = useState<DungeonState>(() => loadDungeonState());
   const [pulse, setPulse] = useState(false);
-  const [panel, setPanel] = useState<'run' | 'relics' | 'bestiary' | 'titles'>('run');
+  const [panel, setPanel] = useState<'town' | 'run' | 'skills' | 'idle' | 'relics' | 'achievements'>('town');
   const [fx, setFx] = useState<keyof typeof DUNGEON_FX | null>(null);
   const [doctrine, setDoctrine] = useState<DoctrineQuestion | null>(null);
   const [doctrineSolved, setDoctrineSolved] = useState(false);
+  const bonuses = useMemo(() => combatBonuses(state.skills), [state.skills]);
 
   useEffect(() => {
     saveDungeonState(state);
@@ -209,12 +212,13 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     void audio.unlock('crawl');
     audio.sfx('boss');
     flashFx('boss');
-    setState(prev => enterRoom({
+    setPanel('run');
+    setState(prev => checkAchievements(enterRoom({
       ...prev,
-      player: { ...prev.player, hp: prev.player.maxHp },
+      player: { ...prev.player, maxHp: 42 + bonuses.maxHp, hp: 42 + bonuses.maxHp, attack: Math.max(prev.player.attack, 7 + bonuses.attack), defense: Math.max(prev.player.defense, 2 + bonuses.defense), crit: Math.max(prev.player.crit, 6 + bonuses.crit) },
       totalRuns: prev.totalRuns + 1,
       run: { ...prev.run, active: true, log: ['RUN STARTED: DO NOT TRUST THE LOCKER ROOM'] },
-    }, 1));
+    }, 1)));
   };
 
   const nextRoom = () => {
@@ -242,14 +246,16 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
       const enemyRemaining = Number(prev.run.log.find(l => l.startsWith('ENEMY_HP:'))?.split(':')[1] ?? enemyMax);
       const didCrit = Math.random() * 100 < prev.player.crit;
       const bossGuard = isBoss ? 0.62 : 1;
-      const playerDamage = Math.max(1, Math.floor((prev.player.attack + Math.floor(prev.player.level / 2) - currentEnemy.defense + (didCrit ? prev.player.attack : 0)) * bossGuard));
+      const skillB = combatBonuses(prev.skills);
+      const playerDamage = Math.max(1, Math.floor((prev.player.attack + skillB.attack + Math.floor(prev.player.level / 2) - currentEnemy.defense + (didCrit ? prev.player.attack + Math.floor(skillB.crit / 2) : 0)) * bossGuard));
       const enemyNext = enemyRemaining - playerDamage;
       let next = appendLog(prev, `${didCrit ? 'CRIT! ' : ''}${currentEnemy.name} TAKES ${playerDamage}`);
       next.run.log = next.run.log.filter(l => !l.startsWith('ENEMY_HP:'));
       if (enemyNext <= 0) {
+        const coinReward = Math.floor((currentEnemy.coins + Math.floor(prev.run.room / 2)) * skillB.coinBoost);
         const { player, leveled } = grantXp({
           ...next.player,
-          coins: next.player.coins + currentEnemy.coins + Math.floor(prev.run.room / 2),
+          coins: next.player.coins + coinReward,
         }, currentEnemy.xp + prev.run.room);
         const title = pickBySeed(DUNGEON_TITLES, prev.run.room * 13 + currentEnemy.name.length);
         next = {
@@ -264,7 +270,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
             bossId: undefined,
             offeredRelicIds: relicOffers(prev.run.room + 1),
             log: [
-              `${currentEnemy.name} DEFEATED. +${currentEnemy.coins} COINS`,
+              `${currentEnemy.name} DEFEATED. +${coinReward} COINS`,
               leveled ? `LEVEL UP: LVL ${player.level}` : `TITLE UNLOCKED: ${title}`,
               ...next.run.log,
             ].slice(0, 9),
@@ -274,7 +280,7 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
         getDungeonAudio().sfx(prev.run.roomType === 'boss' ? 'level' : 'loot');
         return next;
       }
-      const enemyDamage = Math.max(1, enemyAttackPower(currentEnemy, prev.run.room, isBoss) - prev.player.defense);
+      const enemyDamage = Math.max(1, enemyAttackPower(currentEnemy, prev.run.room, isBoss) - prev.player.defense - skillB.defense);
       const blocked = enemyDamage === 0;
       const hp = prev.player.hp - enemyDamage;
       if (hp <= 0) {
@@ -440,16 +446,68 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
     flashFx('level');
     setState(prev => {
       if (!prev.pendingWorkoutBonus) return prev;
+      const skillResult = addSkillXp(prev.skills, prev.pendingWorkoutBonus.skillXp ?? {});
+      const lootRolls = prev.pendingWorkoutBonus.lootRolls ?? 0;
+      const resources = prev.town.resources.map(resource => (
+        resource.id === 'chalk' ? { ...resource, amount: resource.amount + lootRolls * 2 } :
+        resource.id === 'plates' ? { ...resource, amount: resource.amount + Math.floor(lootRolls / 2) } :
+        resource.id === 'protein' ? { ...resource, amount: resource.amount + lootRolls } :
+        resource
+      ));
       const { player, leveled } = grantXp({
         ...prev.player,
         coins: prev.player.coins + prev.pendingWorkoutBonus.coins,
         attack: prev.player.attack + prev.pendingWorkoutBonus.buffAttack,
       }, prev.pendingWorkoutBonus.xp);
-      return appendLog({
+      return checkAchievements(appendLog({
         ...prev,
+        skills: skillResult.skills,
+        town: { ...prev.town, resources },
         player,
         pendingWorkoutBonus: undefined,
-      }, `${prev.pendingWorkoutBonus.label} CLAIMED${leveled ? ' + LEVEL UP' : ''}`);
+      }, `${prev.pendingWorkoutBonus.label} CLAIMED${leveled || skillResult.leveled.length ? ' + LEVEL UP' : ''}`));
+    });
+  };
+
+  const runIdleDelve = (minutes = 2) => {
+    const audio = getDungeonAudio();
+    void audio.unlock('crawl');
+    audio.sfx('coin');
+    flashFx('coin');
+    setState(prev => applyIdleMinutes({
+      ...prev,
+      idleProgress: prev.idleProgress ?? beginIdleProgress(prev),
+    }, minutes));
+    setPanel('idle');
+  };
+
+  const setIdleFocus = (focus: SkillName) => {
+    setState(prev => ({ ...prev, gameSettings: { ...prev.gameSettings, idleFocus: focus } }));
+  };
+
+  const updateGameSetting = <K extends keyof DungeonState['gameSettings']>(key: K, value: DungeonState['gameSettings'][K]) => {
+    setState(prev => ({ ...prev, gameSettings: { ...prev.gameSettings, [key]: value } }));
+  };
+
+  const upgradeBuilding = (id: string) => {
+    setState(prev => {
+      const building = prev.town.buildings.find(b => b.id === id);
+      if (!building) return prev;
+      const cost = Math.floor(building.cost.coins * Math.pow(1.85, building.level - 1));
+      if (prev.player.coins < cost) {
+        onShowToast('Not enough crypt coins');
+        getDungeonAudio().sfx('curse');
+        return prev;
+      }
+      getDungeonAudio().sfx('level');
+      return appendLog({
+        ...prev,
+        player: { ...prev.player, coins: prev.player.coins - cost },
+        town: {
+          ...prev.town,
+          buildings: prev.town.buildings.map(b => b.id === id ? { ...b, level: b.level + 1 } : b),
+        },
+      }, `${building.name.toUpperCase()} UPGRADED TO LVL ${building.level + 1}`);
     });
   };
 
@@ -571,17 +629,79 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
           )}
         </div>
 
-        <div className="mt-3 grid grid-cols-4 gap-1">
-          {(['run', 'relics', 'bestiary', 'titles'] as const).map(p => (
+        <div className="mt-3 grid grid-cols-3 gap-1">
+          {(['town', 'run', 'skills', 'idle', 'relics', 'achievements'] as const).map(p => (
             <button key={p} onClick={() => setPanel(p)} className={`rounded-sm border px-2 py-2 text-xs ${panel === p ? 'border-vapor-cyan text-vapor-cyan bg-vapor-cyan/10' : 'border-vapor-pink/50 text-vapor-muted'}`}>{p}</button>
           ))}
         </div>
 
         <div className="dungeon-card mt-3 p-3">
+          {panel === 'town' && (
+            <div className="space-y-3">
+              <div className="rounded border border-vapor-pink/50 bg-vapor-pink/10 p-3">
+                <p className="text-[11px] tracking-[0.22em] text-vapor-muted">SWOLECRYPT LOBBY</p>
+                <p className="text-lg font-black text-vapor-pink">NEON TAVERN // TOTAL LVL {skillTotal(state.skills)}</p>
+                <p className="text-xs text-vapor-muted">Coins build the town. Workouts feed skills. Rest timers run idle delves.</p>
+              </div>
+              <div className="grid gap-2">
+                {state.town.buildings.map(b => {
+                  const cost = Math.floor(b.cost.coins * Math.pow(1.85, b.level - 1));
+                  return (
+                    <button key={b.id} onClick={() => upgradeBuilding(b.id)} className="dungeon-loot text-left">
+                      <span className="text-2xl">{b.id === 'training_hall' ? '🏛️' : b.id === 'blacksmith' ? '⚒️' : b.id === 'library' ? '📚' : '🐀'}</span>
+                      <span><b>{b.name} LVL {b.level}</b> // {cost} COINS<br/><small>{b.effect}. {b.description}</small></span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                {state.town.resources.map(r => <div key={r.id} className="dungeon-stat">{r.icon} {r.name}<br/><span>{r.amount}</span></div>)}
+              </div>
+            </div>
+          )}
           {panel === 'run' && (
             <div className="space-y-1 text-xs text-vapor-muted">
               {state.run.log.filter(l => !l.startsWith('ENEMY_HP:') && l !== 'ROOM_RESOLVED').map((line, i) => <p key={i}>▸ {line}</p>)}
               <p className="pt-2 text-vapor-cyan">DEEPEST ROOM {state.deepestRoom} // BOSSES {state.bossesDefeated} // RUNS {state.totalRuns}</p>
+            </div>
+          )}
+          {panel === 'skills' && (
+            <div className="grid gap-2">
+              {SKILL_ORDER.map(name => {
+                const skill = state.skills[name];
+                const need = xpForLevel(skill.level);
+                return (
+                  <div key={name} className="rounded border border-vapor-cyan/40 bg-vapor-cyan/5 p-2">
+                    <div className="flex justify-between text-xs"><b className="text-vapor-pink">{skill.icon} {skill.displayName} LVL {skill.level}</b><span>{skill.xp}/{need} XP</span></div>
+                    <div className="mt-1 h-2 bg-black border border-vapor-cyan/30"><div className="h-full bg-gradient-to-r from-vapor-cyan to-vapor-pink" style={{ width: `${Math.min(100, skill.xp / need * 100)}%` }} /></div>
+                    <p className="mt-1 text-[11px] text-vapor-muted">{skill.description}</p>
+                  </div>
+                );
+              })}
+              <p className="text-xs text-vapor-green">BONUSES // +{bonuses.attack} ATK / +{bonuses.maxHp} HP / +{bonuses.crit} CRIT / {(bonuses.coinBoost * 100 - 100).toFixed(0)}% COINS</p>
+            </div>
+          )}
+          {panel === 'idle' && (
+            <div className="space-y-3 text-xs">
+              <div className="rounded border border-vapor-purple bg-vapor-purple/10 p-3">
+                <p className="text-vapor-pink font-bold">IDLE DELVE ENGINE</p>
+                <p className="text-vapor-muted">Auto-clears during rest timers when enabled. Active play is stronger; idle keeps the grind breathing.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {(['relaxed','balanced','intense'] as const).map(i => <button key={i} onClick={() => updateGameSetting('idleModeIntensity', i)} className={`rounded border py-2 ${state.gameSettings.idleModeIntensity === i ? 'border-vapor-green text-vapor-green' : 'border-vapor-pink/50 text-vapor-muted'}`}>{i}</button>)}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => updateGameSetting('idleModeEnabled', !state.gameSettings.idleModeEnabled)} className="btn-secondary py-2">Idle {state.gameSettings.idleModeEnabled ? 'On' : 'Off'}</button>
+                <button onClick={() => updateGameSetting('autoClaimWorkoutBonus', !state.gameSettings.autoClaimWorkoutBonus)} className="btn-secondary py-2">Auto Claim {state.gameSettings.autoClaimWorkoutBonus ? 'On' : 'Off'}</button>
+              </div>
+              <p className="text-vapor-muted">Focus skill:</p>
+              <div className="grid grid-cols-3 gap-1">
+                {SKILL_ORDER.map(s => <button key={s} onClick={() => setIdleFocus(s)} className={`rounded border px-2 py-1 ${state.gameSettings.idleFocus === s ? 'border-vapor-cyan text-vapor-cyan' : 'border-vapor-pink/40 text-vapor-muted'}`}>{state.skills[s].icon} {s}</button>)}
+              </div>
+              <button onClick={() => runIdleDelve(3)} className="btn-primary w-full py-3">Simulate 3m Rest Delve</button>
+              <div className="space-y-1 text-vapor-muted">
+                {(state.idleProgress?.log ?? ['NO IDLE DELVES YET']).map((l, i) => <p key={i}>▸ {l}</p>)}
+              </div>
             </div>
           )}
           {panel === 'relics' && (
@@ -591,17 +711,16 @@ export default function DungeonCrawlerGame({ onClose, onShowToast }: Props) {
               ))}
             </div>
           )}
-          {panel === 'bestiary' && (
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {state.discoveredMonsterIds.length === 0 ? <p className="text-vapor-muted">DEFEAT CREATURES TO FILL THE CURSED DEX.</p> : state.discoveredMonsterIds.map(id => {
-                const e = [...MONSTERS, ...BOSSES].find(m => m.id === id);
-                return e ? <div key={id} className="rounded border border-vapor-purple p-2"><MiniAsset kind={assetKindForEnemy(e)} id={e.id} label={e.name} /> <span>{e.name}</span></div> : null;
-              })}
-            </div>
-          )}
-          {panel === 'titles' && (
-            <div className="flex flex-wrap gap-2">
-              {state.unlockedTitles.map(t => <span key={t} className="chip">{t}</span>)}
+          {panel === 'achievements' && (
+            <div className="grid gap-2 text-xs">
+              {state.achievements.map(a => (
+                <div key={a.id} className={`rounded border p-2 ${a.unlocked ? 'border-vapor-green bg-vapor-green/10 text-vapor-green' : 'border-vapor-purple text-vapor-muted'}`}>
+                  <b>{a.unlocked ? '✓ ' : '□ '}{a.name}</b><br/><span>{a.description}</span>
+                </div>
+              ))}
+              <div className="flex flex-wrap gap-2 pt-2">
+                {state.unlockedTitles.map(t => <span key={t} className="chip">{t}</span>)}
+              </div>
             </div>
           )}
         </div>

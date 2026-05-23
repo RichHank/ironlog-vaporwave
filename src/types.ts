@@ -142,11 +142,83 @@ export interface DungeonWorkoutBonus {
   xp: number;
   buffAttack: number;
   label: string;
+  skillXp?: Partial<Record<SkillName, number>>;
+  lootRolls?: number;
+}
+
+export type SkillName = 'strength' | 'endurance' | 'dexterity' | 'nutrition' | 'knowledge' | 'luck';
+
+export interface Skill {
+  name: SkillName;
+  level: number;
+  xp: number;
+  displayName: string;
+  description: string;
+  icon: string;
+}
+
+export interface GameSettings {
+  idleModeEnabled: boolean;
+  idleModeIntensity: 'relaxed' | 'balanced' | 'intense';
+  autoClaimWorkoutBonus: boolean;
+  showDungeonDuringRest: boolean;
+  idleFocus: SkillName;
+}
+
+export type EquipmentSlot = 'head' | 'chest' | 'legs' | 'weapon' | 'accessory1' | 'accessory2';
+
+export interface GameResource {
+  id: string;
+  name: string;
+  amount: number;
+  icon: string;
+  description: string;
+}
+
+export interface Building {
+  id: string;
+  name: string;
+  level: number;
+  description: string;
+  effect: string;
+  cost: { coins: number; skills?: Partial<Record<SkillName, number>> };
+}
+
+export interface TownState {
+  buildings: Building[];
+  resources: GameResource[];
+  upgrades: string[];
+}
+
+export interface IdleProgress {
+  startTime: number;
+  lastTickAt: number;
+  roomsCleared: number;
+  coinsEarned: number;
+  xpEarned: Partial<Record<SkillName, number>>;
+  roomsPerMinute: number;
+  riskLevel: number;
+  log: string[];
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  unlocked: boolean;
+  unlockedAt?: number;
+  reward?: { coins?: number; xp?: Partial<Record<SkillName, number>> };
 }
 
 export interface DungeonState {
   player: DungeonPlayer;
   run: DungeonRun;
+  skills: Record<SkillName, Skill>;
+  gameSettings: GameSettings;
+  equipment: Partial<Record<EquipmentSlot, string>>;
+  town: TownState;
+  achievements: Achievement[];
+  idleProgress?: IdleProgress | null;
   relicIds: string[];
   discoveredMonsterIds: string[];
   discoveredRelicIds: string[];
